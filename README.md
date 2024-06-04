@@ -6,11 +6,10 @@ SecureChat is an External Module (EM) designed as a service to access Stanford's
 ## Usage from other Project EM
 ```php
 $moduleDirectoryPrefix = "SecureChatAI"; // Module prefix of your target system-level module
-$method = "callAI";
 $messages = [...]; // The data you want to pass to callAI
 $params = [...];
-
-$result = \ExternalModules\ExternalModules::call($moduleDirectoryPrefix, $method, [$messages, $params]);
+$em = \ExternalModules\ExternalModules::getModuleInstance($moduleDirectoryPrefix);
+$result = $em->callAI($messages, $params);
 ```
 
 ## Context Management (ChatML)
