@@ -1,9 +1,7 @@
-Sure! Here is your text formatted as Markdown:
-
 # SecureChat
-SecureChat is an External Module (EM) designed as a service to access Stanford's Instance of OpenAI Models, specifically Secure Chat AI. This EM is typically used in the context of Stanford Health Care's systems.
+SecureChat is an External Module (EM) designed as a service to access Stanford's Instance of OpenAI Models, Secure Chat AI.
 
-**Requirement:** Reliable connection to SHC's VPN. You can connect through the VPN via [Stanford Health Care's portal](https://vpn.stanfordhealthcare.org/) using the F5 Client.
+**Requirement:** Connection to SHC's VPN. You can connect through the VPN via [Stanford Health Care's portal](https://vpn.stanfordhealthcare.org/) using the F5 Client.
 
 
 ## Context Management (ChatML)
