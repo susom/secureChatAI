@@ -39,6 +39,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
         ]);
     }
 
+    /**
+     * Call the AI API with the provided messages and parameters.
+     *
+     * @param array $messages The messages to send to the AI.
+     * @param array $params Additional parameters to customize the API call.
+     * @return mixed The response from the AI API or an error message.
+     */
     public function callAI($messages, $params = []) {
         // Ensure the secure chat AI is initialized
         if(!$this->guzzleClient) {
@@ -59,20 +66,48 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
 
             return json_decode($response->getBody(), true);
         } catch (GuzzleException $e) {
-            return "Guzzle error: " . $e->getMessage();
+            $this->emError("Guzzle error: " . $e->getMessage());
+            return [
+                'error' => true,
+                'message' => "Guzzle error: " . $e->getMessage()
+            ];
+        } catch (\Exception $e) {
+            $this->emError("General error: " . $e->getMessage());
+            return [
+                'error' => true,
+                'message' => "General error: " . $e->getMessage()
+            ];
         }
     }
 
+    /**
+     * Extract the main response text from the API response.
+     *
+     * @param array $response The API response.
+     * @return string The extracted response text.
+     */
     public function extractResponseText($response)
     {
         return $response['choices'][0]['message']['content'] ?? 'No content available';
     }
 
+    /**
+     * Extract the usage tokens from the API response.
+     *
+     * @param array $response The API response.
+     * @return mixed The extracted usage data or a default message.
+     */
     public function extractUsageTokens($response)
     {
         return $response['usage'] ?? 'No usage data available';
     }
 
+    /**
+     * Extract metadata from the API response.
+     *
+     * @param array $response The API response.
+     * @return array The extracted metadata.
+     */
     public function extractMetaData($response)
     {
         return [
