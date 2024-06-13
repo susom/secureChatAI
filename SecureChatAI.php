@@ -9,7 +9,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
 
     use emLoggerTrait;
 
-    private $api_url;
+    private $api_ai_url;
+    private $api_embeddings_url;
     private $api_key;
     private $defaultParams;
     private $guzzleClient;
@@ -17,11 +18,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
     public function __construct() {
 		parent::__construct();
 		// Other code to run when object is instantiated
-        // Trying second commit 
+        // Trying second commit
 	}
 
     public function initSecureChatAI() {
-        $this->api_url = $this->getSystemSetting('secure-chat-api-url');
+        $this->api_ai_url = $this->getSystemSetting('secure-chat-api-url');
+        $this->api_embeddings_url = $this->getSystemSetting('secure-chat-embeddings-api-url');
         $this->api_key = $this->getSystemSetting('secure-chat-api-token');
 
         $this->defaultParams = [
@@ -47,17 +49,26 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
      * @param array $params Additional parameters to customize the API call.
      * @return mixed The response from the AI API or an error message.
      */
-    public function callAI($messages, $params = []) {
+    public function callAI($model, $messages, $input = '', $params = []) {
         // Ensure the secure chat AI is initialized
         if(!$this->guzzleClient) {
             $this->initSecureChatAI();
         }
 
         $data = array_merge($this->defaultParams, $params);
-        $data['messages'] = $messages;
+        if ($model == "gpt-4o") {
+            $data['messages'] = $messages;
+        } elseif($model == "ada-002"){
+            $data['input'] = $input;
+        }
+
+        $api_endpoint = $this->api_ai_url;
+        if($model == "ada-002"){
+            $api_endpoint = $this->api_embeddings_url;
+        }
 
         try {
-            $response = $this->guzzleClient->request('POST', $this->api_url . '&api-key=' . $this->api_key, [
+            $response = $this->guzzleClient->request('POST', $api_endpoint . '&api-key=' . $this->api_key, [
                 'headers' => [
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json'
