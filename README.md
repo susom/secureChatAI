@@ -8,8 +8,9 @@ SecureChat is an External Module (EM) designed as a service to access Stanford's
 $moduleDirectoryPrefix = "SecureChatAI"; // Module prefix of your target system-level module
 $messages = [...]; // The data you want to pass to callAI
 $params = [...];
+$model = "gpt-4o" // or "ada-002" for embeddings
 $em = \ExternalModules\ExternalModules::getModuleInstance($moduleDirectoryPrefix);
-$result = $em->callAI($messages, $params);
+$result = $em->callAI($model, $messages, $params);
 ```
 
 ## Context Management (ChatML)

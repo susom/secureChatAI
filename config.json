@@ -56,6 +56,12 @@
             "type": "text"
         },
         {
+            "key": "secure-chat-embeddings-api-url",
+            "name": "<b>Api Endpoint</b> for embeddings",
+            "required": false,
+            "type": "text"
+        },
+        {
             "key": "secure-chat-api-token",
             "name": "<b>Api Token</b>",
             "required": false,
