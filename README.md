@@ -13,7 +13,8 @@ $em = \ExternalModules\ExternalModules::getModuleInstance($moduleDirectoryPrefix
 $result = $em->callAI($model, $messages, $params);
 ```
 
-## Context Management (ChatML)
+## AI Endpoint (ChatML)
+Expected input:
 ```json
 [
     {"role":"system", "content":"context text"},
@@ -22,7 +23,40 @@ $result = $em->callAI($model, $messages, $params);
     {"role":"user", "content":"newest user query"}
 ]
 ```
+Expected output :
+```json
+[
+    {
+        "role": "assistant",
+        "content": "reponse content from AI",
+        "id": "abcxyz123",
+        "model": "gpt-4o-2024-05-13",
+        "usage": {
+            "completion_tokens": 125,
+            "prompt_tokens": 1315,
+            "total_tokens": 1440
+        }
+    }
+]
+```
 
+
+## Embeddings Endpoint (RAG workflow)
+```json
+"RAW TEXT INPUT"
+```
+Expected output :
+```json
+[
+    0.0015534189,
+    -0.016994879,
+    -0.0012200507,
+    0.0027190577,
+    ...,
+    ...,
+    etc
+]
+```
 
 ## Parameters Glosary
 
