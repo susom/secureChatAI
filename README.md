@@ -13,6 +13,30 @@ $em = \ExternalModules\ExternalModules::getModuleInstance($moduleDirectoryPrefix
 $result = $em->callAI($model, $messages, $params);
 ```
 
+Usage of different models might require alternate parameters. See the example calls below for information:
+
+## Example call (GPT-4o)
+```php
+$model = "gpt-4o";
+$messages = [
+    [
+        'role' => 'system',
+        'content' => 'What is 1+1'
+    ]
+];
+
+$response = $this->callAI($model, ['messages' => $messages]);
+```
+## Example call (ADA-002)
+```php
+$model = "ada-002";
+$input = "What is 2+2?"
+
+$response = $this->callAI($model, ['input' => $input]);
+```
+
+
+
 ## AI Endpoint (ChatML)
 Expected input:
 ```json
@@ -89,4 +113,5 @@ Expected output :
 - **Description**: A string or array of strings that specify where the model should stop generating further tokens.
 - **Range**: Any string or array of strings
 - **Effect**: If any of the specified stop sequences are encountered, the model will stop generating further tokens. If `null`, the model continues until it reaches the token limit or a default stopping condition.
+
 
