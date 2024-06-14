@@ -2,6 +2,8 @@
 namespace Stanford\SecureChatAI;
 
 require_once "emLoggerTrait.php";
+
+use Google\Exception;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 
@@ -9,37 +11,39 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
 
     use emLoggerTrait;
 
-    private $api_ai_url;
-    private $api_embeddings_url;
-    private $api_key;
-    private $defaultParams;
-    private $guzzleClient;
+    private string $api_ai_url;
+    private string $api_embeddings_url;
+    private string $api_key;
+    private array $defaultParams;
+    private $guzzleClient = null;
+    private $modelConfig = [
+        'gpt-4o' => [
+            'endpoint' => 'getApiAiUrl',
+            'required' => ['messages']
+        ],
+        'ada-002' => [
+            'endpoint' => 'getApiEmbeddingsUrl',
+            'required' => ['input']
+        ]
+    ];
 
     public function __construct() {
 		parent::__construct();
-		// Other code to run when object is instantiated
-        // Trying second commit
 	}
 
     public function initSecureChatAI() {
-        $this->api_ai_url = $this->getSystemSetting('secure-chat-api-url');
-        $this->api_embeddings_url = $this->getSystemSetting('secure-chat-embeddings-api-url');
-        $this->api_key = $this->getSystemSetting('secure-chat-api-token');
-
-        $this->defaultParams = [
+        $this->setApiAiUrl($this->getSystemSetting('secure-chat-api-url'));
+        $this->setApiEmbeddingsUrl($this->getSystemSetting('secure-chat-embeddings-api-url'));
+        $this->setApiKey($this->getSystemSetting('secure-chat-api-token'));
+        $this->setDefaultParams([
             'temperature' => 0.7,
             'top_p' => 0.95,
             'frequency_penalty' => 0,
             'presence_penalty' => 0,
             'max_tokens' => 800,
             'stop' => null
-        ];
-
-        $this->guzzleClient = new Client([
-            'timeout' => 30,
-            'connect_timeout' => 5,
-            'verify' => false
         ]);
+        $this->guzzleClient = $this->getGuzzleClient();
     }
 
     /**
@@ -49,26 +53,32 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
      * @param array $params Additional parameters to customize the API call.
      * @return mixed The response from the AI API or an error message.
      */
-    public function callAI($model, $messages, $input = '', $params = []) {
-        // Ensure the secure chat AI is initialized
-        if(!$this->guzzleClient) {
-            $this->initSecureChatAI();
-        }
-
-        $data = array_merge($this->defaultParams, $params);
-        if ($model == "gpt-4o") {
-            $data['messages'] = $messages;
-        } elseif($model == "ada-002"){
-            $data['input'] = $input;
-        }
-
-        $api_endpoint = $this->api_ai_url;
-        if($model == "ada-002"){
-            $api_endpoint = $this->api_embeddings_url;
-        }
-
+    public function callAI($model, $params = []) {
         try {
-            $response = $this->guzzleClient->request('POST', $api_endpoint . '&api-key=' . $this->api_key, [
+
+            // Ensure the secure chat AI is initialized
+            $this->initSecureChatAI();
+
+            $config = $this->getModelConfig();
+
+            // Check if model is supported
+            if (!isset($config[$model])) {
+                throw new Exception('Unsupported model: ' . $model);
+            }
+
+            $modelConfig = $config[$model];
+            $api_endpoint = $this->{$modelConfig['endpoint']}();
+
+            // Ensure required parameters are provided
+            foreach ($modelConfig['required'] as $param) {
+                if (empty($params[$param])) {
+                    throw new Exception('Missing required parameter: ' . $param);
+                }
+            }
+
+            $data = array_merge($this->getDefaultParams(), $params);
+
+            $response = $this->getGuzzleClient()->request('POST', $api_endpoint . '&api-key=' . $this->api_key, [
                 'headers' => [
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json'
@@ -77,6 +87,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
             ]);
 
             return json_decode($response->getBody(), true);
+
         } catch (GuzzleException $e) {
             $this->emError("Guzzle error: " . $e->getMessage());
             return [
@@ -84,10 +95,10 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
                 'message' => "Guzzle error: " . $e->getMessage()
             ];
         } catch (\Exception $e) {
-            $this->emError("General error: " . $e->getMessage());
+            $this->emError("Error: in SecureChat: " . $e->getMessage());
             return [
                 'error' => true,
-                'message' => "General error: " . $e->getMessage()
+                'message' => "Error in SecureChat: " . $e->getMessage()
             ];
         }
     }
@@ -129,5 +140,109 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
             'model' => $response['model'] ?? 'N/A',
             'usage' => $response['usage'] ?? 'N/A'
         ];
+    }
+
+    /**
+     * @return string
+     */
+    public function getApiAiUrl()
+    {
+        return $this->api_ai_url;
+    }
+
+    /**
+     * @param string $url
+     */
+    public function setApiAiUrl(string $url): void
+    {
+        $this->api_ai_url = $url;
+    }
+
+    /**
+     * @return string
+     */
+    public function getApiEmbeddingsUrl()
+    {
+        return $this->api_embeddings_url;
+    }
+
+    /**
+     * @param string $api_embeddings_url
+     */
+    public function setApiEmbeddingsUrl(string $api_embeddings_url): void
+    {
+        $this->api_embeddings_url = $api_embeddings_url;
+    }
+
+    /**
+     * @return string
+     */
+    public function getApiKey()
+    {
+        return $this->api_key;
+    }
+
+    /**
+     * @param string $api_key
+     */
+    public function setApiKey(string $api_key): void
+    {
+        $this->api_key = $api_key;
+    }
+
+    /**
+     * @return array
+     */
+    public function getDefaultParams()
+    {
+        return $this->defaultParams;
+    }
+
+    /**
+     * @param array $defaultParams
+     */
+    public function setDefaultParams(array $defaultParams): void
+    {
+        $this->defaultParams = $defaultParams;
+    }
+
+    /**
+     * @return Client
+     */
+    public function getGuzzleClient()
+    {
+        if (!$this->guzzleClient) {
+            $this->setGuzzleClient(new Client([
+                'timeout' => 30,
+                'connect_timeout' => 5,
+                'verify' => false
+            ]));
+        }
+        return $this->guzzleClient;
+    }
+
+    /**
+     * @param Client $guzzleClient
+     */
+    public function setGuzzleClient(Client $guzzleClient): void
+    {
+        $this->guzzleClient = $guzzleClient;
+    }
+
+    /**
+     * @param array $config
+     * @return void
+     */
+    public function setModelConfig(array $config): void
+    {
+        $this->modelConfig = $config;
+    }
+
+    /**
+     * @return array
+     */
+    public function getModelConfig(): array
+    {
+        return $this->modelConfig;
     }
 }
