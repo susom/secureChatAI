@@ -1,4 +1,5 @@
 <?php
+
 namespace Stanford\SecureChatAI;
 
 require_once "emLoggerTrait.php";
@@ -7,10 +8,10 @@ use Google\Exception;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 
-class SecureChatAI extends \ExternalModules\AbstractExternalModule {
+class SecureChatAI extends \ExternalModules\AbstractExternalModule
+{
 
     use emLoggerTrait;
-
     private string $api_ai_url;
     private string $api_embeddings_url;
     private string $api_key;
@@ -27,11 +28,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
         ]
     ];
 
-    public function __construct() {
-		parent::__construct();
-	}
+    public function __construct()
+    {
+        parent::__construct();
+    }
 
-    public function initSecureChatAI() {
+    public function initSecureChatAI()
+    {
         $this->setApiAiUrl($this->getSystemSetting('secure-chat-api-url'));
         $this->setApiEmbeddingsUrl($this->getSystemSetting('secure-chat-embeddings-api-url'));
         $this->setApiKey($this->getSystemSetting('secure-chat-api-token'));
@@ -53,7 +56,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule {
      * @param array $params Additional parameters to customize the API call.
      * @return mixed The response from the AI API or an error message.
      */
-    public function callAI($model, $params = []) {
+    public function callAI($model, $params = [])
+    {
         try {
 
             // Ensure the secure chat AI is initialized
