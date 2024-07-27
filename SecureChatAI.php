@@ -169,7 +169,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      */
     public function extractResponseText($response)
     {
-        return $response['choices'][0]['message']['content'] ?? 'No content available';
+        return $response['choices'][0]['message']['content'] ?? json_encode($response);
     }
 
     /**
