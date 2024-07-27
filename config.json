@@ -1,54 +1,46 @@
 {
-	"name": "SecureChatAI",
-
-	"namespace": "Stanford\\SecureChatAI",
-
-	"description": "SecureChatAI is an External Module (EM) designed as a service to access Stanford's Instance of OpenAI Models, specifically Secure Chat AI",
-
-	"documentation": "README.md",
-
-	"authors": [
-		{
-			"name": "Irvin Szeto",
-			"email": "irvins@stanford.edu",
-			"institution": "Stanford University"
-		}
-	],
-
+    "name": "SecureChatAI",
+    "namespace": "Stanford\\SecureChatAI",
+    "description": "SecureChatAI is an External Module (EM) designed as a service to access Stanford's Instance of OpenAI Models, specifically Secure Chat AI",
+    "documentation": "README.md",
+    "authors": [
+        {
+            "name": "Irvin Szeto",
+            "email": "irvins@stanford.edu",
+            "institution": "Stanford University"
+        },
+        {
+            "name": "Jordan Schultz",
+            "email": "jmschult@stanford.edu",
+            "institution": "Stanford University"
+        },
+        {
+            "name": "Ihab Zeedia",
+            "email": "ihabz@stanford.edu",
+            "institution": "Stanford University"
+        }
+    ],
     "framework-version": 9,
-
-	"permissions": [
-		"redcap_module_system_enable",
-		"redcap_module_project_enable",
-		"redcap_module_save_configuration"
-	],
-
-	"enable-every-page-hooks-on-system-pages": false,
-
-	"links": {
-		"project": [
-
-		],
-		"control-center": [
-
-		]
-	},
-
-	"no-auth-pages": [
-
-	],
-
-	"project-settings": [
-		{
-			"key": "enable-project-debug-logging",
-			"name": "<b>Enable Debug Logging</b><br><i>(optional)</i> Requires installation and configuration of emLogger",
-			"required": false,
-			"type": "checkbox"
-		}
-	],
-
-
-	"system-settings": [
+    "permissions": [
+        "redcap_module_system_enable",
+        "redcap_module_project_enable",
+        "redcap_module_save_configuration"
+    ],
+    "enable-every-page-hooks-on-system-pages": false,
+    "links": {
+        "project": [],
+        "control-center": []
+    },
+    "no-auth-pages": [],
+    "project-settings": [
+        {
+            "key": "enable-project-debug-logging",
+            "name": "<b>Enable Debug Logging</b><br><i>(optional)</i> Requires installation and configuration of emLogger",
+            "required": false,
+            "type": "checkbox"
+        }
+    ],
+    "system-settings": [
         {
             "key": "secure-chat-api-url",
             "name": "<b>Api Endpoint</b> Includes LLM Model",
@@ -67,18 +59,73 @@
             "required": false,
             "type": "text"
         },
-		{
-			"key": "enable-system-debug-logging",
-			"name": "<b>Enable Debug Logging (system-wide)</b><i>(optional)</i> Requires installation and configuration of emLogger",
-			"required": false,
-			"type": "checkbox"
-		}
-	],
-
-	"compatibility": {
-		"php-version-min": "",
-		"php-version-max": "",
-		"redcap-version-min": "",
-		"redcap-version-max": ""
-	}
+        {
+            "key": "gpt-model",
+            "name": "<b>GPT Model</b> default : <i>gpt-4o</i>",
+            "required": false,
+            "type": "text",
+            "default": "gpt-4"
+        },
+        {
+            "key": "gpt-temperature",
+            "name": "<b>Temperature</b> default : <i>0.7</i> <br>(controls randomness) ",
+            "required": false,
+            "type": "number",
+            "min": 0,
+            "max": 1,
+            "default": 0.7
+        },
+        {
+            "key": "gpt-top-p",
+            "name": "<b>Top P</b> default : <i>0.9</i> <br>(controls diversity via nucleus sampling)",
+            "required": false,
+            "type": "number",
+            "min": 0,
+            "max": 1,
+            "default": 0.9
+        },
+        {
+            "key": "gpt-frequency-penalty",
+            "name": "<b>Frequency Penalty</b> default : <i>0.5</i> <br>(reduces repetition)",
+            "required": false,
+            "type": "number",
+            "min": 0,
+            "max": 2,
+            "default": 0.5
+        },
+        {
+            "key": "gpt-presence-penalty",
+            "name": "<b>Presence Penalty</b> default : <i>0.0</i> <br>(increases topic variety)",
+            "required": false,
+            "type": "number",
+            "min": 0,
+            "max": 2,
+            "default": 0.0
+        },
+        {
+            "key": "gpt-max-tokens",
+            "name": "<b>Max Tokens</b> default : <i>800</i> <br>(limits response length)",
+            "required": false,
+            "type": "number",
+            "default": 800
+        },
+        {
+            "key": "interaction-log-project-id",
+            "name": "<b>Interaction Log Project ID</b>",
+            "required": true,
+            "type": "text"
+        },
+        {
+            "key": "enable-system-debug-logging",
+            "name": "<b>Enable Debug Logging (system-wide)</b><i>(optional)</i> Requires installation and configuration of emLogger",
+            "required": false,
+            "type": "checkbox"
+        }
+    ],
+    "compatibility": {
+        "php-version-min": "",
+        "php-version-max": "",
+        "redcap-version-min": "",
+        "redcap-version-max": ""
+    }
 }
