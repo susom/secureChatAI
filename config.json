@@ -38,6 +38,10 @@
             "name": "<b>Enable Debug Logging</b><br><i>(optional)</i> Requires installation and configuration of emLogger",
             "required": false,
             "type": "checkbox"
+        },
+        {
+            "key": "guzzle-timeout",
+            "name": "<b>Guzzle Timeout</b><br><i>(optional)</i> Float time in seconds describing the maximum timeout of the request. Default: 5, use 0 to wait indefinitely."
         }
     ],
     "system-settings": [

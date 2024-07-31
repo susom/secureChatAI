@@ -18,6 +18,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     private array $defaultParams;
     private $guzzleClient = null;
+    private $guzzleTimeout = 5.0;
     private $modelConfig = [
         'gpt-4o' => [
             'endpoint' => 'getApiAiUrl',
@@ -36,10 +37,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     public function initSecureChatAI()
     {
+        //Set default API variables from system settings
         $this->setApiAiUrl($this->getSystemSetting('secure-chat-api-url'));
         $this->setApiEmbeddingsUrl($this->getSystemSetting('secure-chat-embeddings-api-url'));
         $this->setApiKey($this->getSystemSetting('secure-chat-api-token'));
 
+        //Set default model parameters
         $this->setDefaultParams([
             'model' => $this->getSystemSetting('gpt-model') ?: 'gpt-4o',
             'temperature' => (float)$this->getSystemSetting('gpt-temperature') ?: 0.7,
@@ -49,6 +52,10 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'max_tokens' => (int)$this->getSystemSetting('gpt-max-tokens') ?: 800,
             'stop' => null  // Assuming stop is not configurable and kept at default
         ]);
+
+        //Set guzzle timeout
+        $timeout = $this->getProjectSetting('guzzle-timeout') ? (float)(strip_tags($this->getProjectSetting('guzzle-timeout'))) : $this->getGuzzleTimeout();
+        $this->setGuzzleTimeout($timeout);
 
         $this->guzzleClient = $this->getGuzzleClient();
     }
@@ -94,7 +101,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         'Content-Type' => 'application/json',
                         'Accept' => 'application/json'
                     ],
-                    'json' => $data
+                    'json' => $data,
+                    'timeout' => $this->getGuzzleTimeout()
                 ]);
 
                 $responseData = json_decode($response->getBody(), true);
@@ -114,7 +122,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         'message' => "Guzzle error after $retries retries: " . $e->getMessage()
                     ];
                 }
-                sleep(2);  // Wait for 2 seconds before retrying
+//                sleep(2);  // Wait for 2 seconds before retrying
             } catch (\Exception $e) {
                 $this->emError("Error: in SecureChat: " . $e->getMessage());
                 return [
@@ -302,6 +310,16 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     public function getModelConfig(): array
     {
         return $this->modelConfig;
+    }
+
+    public function setGuzzleTimeout($float)
+    {
+        $this->guzzleTimeout = $float;
+    }
+
+    public function getGuzzleTimeout(): float
+    {
+        return $this->guzzleTimeout;
     }
 }
 ?>
