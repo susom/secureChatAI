@@ -154,6 +154,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     {
         // Save every data point in log table
         $payload = array_merge($requestData, $responseData);
+        $payload['project_id'] = $project_id;
         $action = new SecureChatLog($this);
 
         // Message capacity is currently ~16mb or 16 million characters
