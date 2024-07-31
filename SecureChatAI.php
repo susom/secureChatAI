@@ -3,10 +3,12 @@
 namespace Stanford\SecureChatAI;
 
 require_once "emLoggerTrait.php";
+require_once "classes/SecureChatLog.php";
 
 use Google\Exception;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
+
 
 class SecureChatAI extends \ExternalModules\AbstractExternalModule
 {
@@ -58,6 +60,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $this->setGuzzleTimeout($timeout);
 
         $this->guzzleClient = $this->getGuzzleClient();
+    }
+
+    /**
+     * @return array
+     * @throws \Exception
+     */
+    public function getSecureChatLogs(){
+        return SecureChatLog::getLogs($this, '52');
     }
 
     /**
@@ -142,31 +152,40 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      */
     private function logInteraction($project_id, $requestData, $responseData)
     {
-        if($project_id && $requestData["model"] == "gpt-4o" && $log_project_id = $this->getSystemSetting('interaction-log-project-id')){
-            $usage = $this->extractUsageTokens($responseData);
+        // Save every data point in log table
+        $payload = array_merge($requestData, $responseData);
+        $action = new SecureChatLog($this);
 
-            //TODO NEED TO GET A SUMMARY OF THE INTERACTION EH?
-            $last_query = array_pop($requestData["messages"]);
-            $summary = "Q: ". $last_query["content"] . "\n\n" . "A: " . $this->extractResponseText($responseData);
+        // Message capacity is currently ~16mb or 16 million characters
+        $action->setValue('message', json_encode($payload));
+        $action->setValue('record', 'SecureChatLog');
+        $action->save();
 
-            // Prepare data for REDCap
-            $data = [
-                'record_id' => $responseData["id"],
-                'project_id' => $project_id,
-                'interaction_ts' => date('Y-m-d H:i:s'),
-                'model' => $responseData["model"],
-                'input_tokens' => $usage['prompt_tokens'],
-                'completion_tokens' => $usage['completion_tokens'],
-                'interaction_summary' => $summary
-            ];
-
-            // Use REDCap's saveData function to save the interaction
-            $response = \REDCap::saveData($log_project_id, 'json', json_encode([$data]));
-
-            if (!empty($response['errors'])) {
-                $this->emError("Error logging interaction to REDCap: " . json_encode($response['errors']));
-            }
-        }
+//        if($project_id && $requestData["model"] == "gpt-4o" && $log_project_id = $this->getSystemSetting('interaction-log-project-id')){
+//            $usage = $this->extractUsageTokens($responseData);
+//
+//            //TODO NEED TO GET A SUMMARY OF THE INTERACTION EH?
+//            $last_query = array_pop($requestData["messages"]);
+//            $summary = "Q: ". $last_query["content"] . "\n\n" . "A: " . $this->extractResponseText($responseData);
+//
+//            // Prepare data for REDCap
+//            $data = [
+//                'record_id' => $responseData["id"],
+//                'project_id' => $project_id,
+//                'interaction_ts' => date('Y-m-d H:i:s'),
+//                'model' => $responseData["model"],
+//                'input_tokens' => $usage['prompt_tokens'],
+//                'completion_tokens' => $usage['completion_tokens'],
+//                'interaction_summary' => $summary
+//            ];
+//
+//            // Use REDCap's saveData function to save the interaction
+//            $response = \REDCap::saveData($log_project_id, 'json', json_encode([$data]));
+//
+//            if (!empty($response['errors'])) {
+//                $this->emError("Error logging interaction to REDCap: " . json_encode($response['errors']));
+//            }
+//        }
     }
 
     /**

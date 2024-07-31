@@ -29,7 +29,14 @@
     "enable-every-page-hooks-on-system-pages": false,
     "links": {
         "project": [],
-        "control-center": []
+        "control-center": [
+            {
+                "name": "SecureChat Log Visualization",
+                "icon": "fa-solid fa-chart-simple",
+                "url": "pages/Visualization.php",
+                "show-header-and-footer": false
+            }
+        ]
     },
     "no-auth-pages": [],
     "project-settings": [
