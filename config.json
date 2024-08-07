@@ -34,7 +34,7 @@
                 "name": "SecureChat Log Visualization",
                 "icon": "fa-solid fa-chart-simple",
                 "url": "pages/Visualization.php",
-                "show-header-and-footer": true
+                "show-header-and-footer": false
             }
         ]
     },
