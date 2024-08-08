@@ -106,7 +106,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 }
 
                 $data = array_merge($this->getDefaultParams(), $params);
-                $response = $this->getGuzzleClient()->request('POST', $api_endpoint . '&api-key=' . $this->api_key, [
+                $response = $this->getGuzzleClient()->request('POST', $api_endpoint . '&subscription-key=' . $this->api_key, [
                     'headers' => [
                         'Content-Type' => 'application/json',
                         'Accept' => 'application/json'
