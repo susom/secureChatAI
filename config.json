@@ -60,13 +60,13 @@
         },
         {
             "key": "secure-chat-embeddings-api-url",
-            "name": "<b>Api Endpoint</b> for embeddings",
+            "name": "<b>Api Endpoint</b> for embeddings (vector)",
             "required": false,
             "type": "text"
         },
         {
             "key": "secure-chat-api-token",
-            "name": "<b>Api Token</b>",
+            "name": "<b>Api Token</b> for LLM & Embeddings",
             "required": false,
             "type": "text"
         },
@@ -121,10 +121,85 @@
             "default": 800
         },
         {
-            "key": "interaction-log-project-id",
-            "name": "<b>Interaction Log Project ID</b>",
-            "required": true,
+            "key": "secure-chat-whisper-api-url",
+            "name": "<b>Api Endpoint</b> for Whisper (speech to text)",
+            "required": false,
             "type": "text"
+        },
+        {
+            "key": "secure-chat-whisper-api-token",
+            "name": "<b>Api Token</b> for Whisper",
+            "required": false,
+            "type": "text"
+        },
+        {
+            "key": "whisper-language",
+            "name": "<b>Whisper Language</b> default: <i>English</i><br>(Language spoken in the audio)",
+            "required": false,
+            "type": "text",
+            "default": "en"
+        },
+        {
+            "key": "whisper-temperature",
+            "name": "<b>Whisper Temperature</b> default: <i>0</i><br>(Temperature for the Whisper model)",
+            "required": false,
+            "type": "number",
+            "min": 0,
+            "max": 1,
+            "default": 0.0
+        },
+        {
+            "key": "whisper-top-p",
+            "name": "<b>Whisper Top P</b> default: <i>1.0</i><br>(Top P for the Whisper model)",
+            "required": false,
+            "type": "number",
+            "min": 0,
+            "max": 1,
+            "default": 1.0
+        },
+        {
+            "key": "whisper-n",
+            "name": "<b>Whisper N</b> default: <i>1</i><br>(Number of candidates to generate)",
+            "required": false,
+            "type": "number",
+            "default": 1
+        },
+        {
+            "key": "whisper-logprobs",
+            "name": "<b>Whisper Logprobs</b> default: <i>null</i><br>(Log probabilities for the top n tokens)",
+            "required": false,
+            "type": "number",
+            "default": null
+        },
+        {
+            "key": "whisper-max-alternate-transcriptions",
+            "name": "<b>Whisper Max Alternate Transcriptions</b> default: <i>1</i><br>(Maximum number of alternate transcriptions)",
+            "required": false,
+            "type": "number",
+            "default": 1
+        },
+        {
+            "key": "whisper-compression-rate",
+            "name": "<b>Whisper Compression Rate</b> default: <i>1.0</i><br>(Compression rate for audio processing)",
+            "required": false,
+            "type": "number",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+        },
+        {
+            "key": "whisper-sample-rate",
+            "name": "<b>Whisper Sample Rate</b> default: <i>16000</i><br>(Sample rate for audio processing in Hz)",
+            "required": false,
+            "type": "number",
+            "default": 16000
+        },
+        {
+            "key": "whisper-condition-on-previous-text",
+            "name": "<b>Whisper Condition on Previous Text</b> default: <i>true</i><br>(Condition on previous text when generating next segment)",
+            "required": false,
+            "type": "checkbox",
+            "default": true
         },
         {
             "key": "enable-system-debug-logging",
