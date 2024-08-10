@@ -9,7 +9,6 @@ use Google\Exception;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 
-
 class SecureChatAI extends \ExternalModules\AbstractExternalModule
 {
     use emLoggerTrait;
@@ -24,11 +23,18 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     private $modelConfig = [
         'gpt-4o' => [
             'endpoint' => 'getApiAiUrl',
-            'required' => ['messages']
+            'required' => ['messages'],
+            'auth_key_name' => 'subscription-key'
         ],
         'ada-002' => [
             'endpoint' => 'getApiEmbeddingsUrl',
-            'required' => ['input']
+            'required' => ['input'],
+            'auth_key_name' => 'subscription-key'
+        ],
+        'whisper' => [
+            'endpoint' => 'getApiWhisperUrl',
+            'required' => ['input'],
+            'auth_key_name' => 'api-key'
         ]
     ];
 
@@ -105,20 +111,107 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     }
                 }
 
-                $data = array_merge($this->getDefaultParams(), $params);
-                $response = $this->getGuzzleClient()->request('POST', $api_endpoint . '&subscription-key=' . $this->api_key, [
-                    'headers' => [
-                        'Content-Type' => 'application/json',
-                        'Accept' => 'application/json'
-                    ],
-                    'json' => $data,
-                    'timeout' => $this->getGuzzleTimeout()
-                ]);
+                // Check if the model is 'whisper'
+                if ($model === 'whisper') {
+                    // Prepare the multipart data, including the parameters
+                    $multipartData = [
+                        [
+                            'name' => 'file',
+                            'contents' => fopen($params['input'], 'r'),
+                            'filename' => 'recording.mp3' // Set the correct filename and extension
+                        ]
+                    ];
+
+                    // Add Whisper-specific parameters to the multipart data
+                    if ($this->getProjectSetting('whisper-language')) {
+                        $multipartData[] = [
+                            'name' => 'language',
+                            'contents' => $this->getProjectSetting('whisper-language')
+                        ];
+                    }
+
+                    if ($this->getProjectSetting('whisper-temperature') !== null) {
+                        $multipartData[] = [
+                            'name' => 'temperature',
+                            'contents' => (string) $this->getProjectSetting('whisper-temperature')
+                        ];
+                    }
+
+                    if ($this->getProjectSetting('whisper-top-p') !== null) {
+                        $multipartData[] = [
+                            'name' => 'top_p',
+                            'contents' => (string) $this->getProjectSetting('whisper-top-p')
+                        ];
+                    }
+
+                    if ($this->getProjectSetting('whisper-n') !== null) {
+                        $multipartData[] = [
+                            'name' => 'n',
+                            'contents' => (string) $this->getProjectSetting('whisper-n')
+                        ];
+                    }
+
+                    if ($this->getProjectSetting('whisper-logprobs') !== null) {
+                        $multipartData[] = [
+                            'name' => 'logprobs',
+                            'contents' => (string) $this->getProjectSetting('whisper-logprobs')
+                        ];
+                    }
+
+                    if ($this->getProjectSetting('whisper-max-alternate-transcriptions') !== null) {
+                        $multipartData[] = [
+                            'name' => 'max_alternate_transcriptions',
+                            'contents' => (string) $this->getProjectSetting('whisper-max-alternate-transcriptions')
+                        ];
+                    }
+
+                    if ($this->getProjectSetting('whisper-compression-rate') !== null) {
+                        $multipartData[] = [
+                            'name' => 'compression_rate',
+                            'contents' => (string) $this->getProjectSetting('whisper-compression-rate')
+                        ];
+                    }
+
+                    if ($this->getProjectSetting('whisper-sample-rate') !== null) {
+                        $multipartData[] = [
+                            'name' => 'sample_rate',
+                            'contents' => (string) $this->getProjectSetting('whisper-sample-rate')
+                        ];
+                    }
+
+                    if ($this->getProjectSetting('whisper-condition-on-previous-text') !== null) {
+                        $multipartData[] = [
+                            'name' => 'condition_on_previous_text',
+                            'contents' => $this->getProjectSetting('whisper-condition-on-previous-text') ? 'true' : 'false'
+                        ];
+                    }
+
+                    // Perform the API call for Whisper
+                    $response = $this->getGuzzleClient()->request('POST', $api_endpoint . '?' . $modelConfig['auth_key_name'] . '=' . $this->api_key, [
+                        'headers' => [
+                            'Accept' => 'application/json',
+                            'Content-Type' => 'multipart/form-data'
+                        ],
+                        'multipart' => $multipartData,
+                        'timeout' => $this->getGuzzleTimeout()
+                    ]);
+                } else {
+                    // Handling for other models like GPT-4o
+                    $data = array_merge($this->getDefaultParams(), $params);
+                    $response = $this->getGuzzleClient()->request('POST', $api_endpoint . '&' . $modelConfig['auth_key_name'] . '=' . $this->api_key, [
+                        'headers' => [
+                            'Content-Type' => 'application/json',
+                            'Accept' => 'application/json'
+                        ],
+                        'json' => $data,
+                        'timeout' => $this->getGuzzleTimeout()
+                    ]);
+                }
 
                 $responseData = json_decode($response->getBody(), true);
 
                 // Log interaction (placeholder)
-                $this->logInteraction($project_id, $data, $responseData);
+                $this->logInteraction($project_id, $params, $responseData);
 
                 return $responseData;
 
@@ -132,7 +225,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         'message' => "Guzzle error after $retries retries: " . $e->getMessage()
                     ];
                 }
-//                sleep(2);  // Wait for 2 seconds before retrying
             } catch (\Exception $e) {
                 $this->emError("Error: in SecureChat: " . $e->getMessage());
                 return [
@@ -142,6 +234,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             }
         }
     }
+
 
     /**
      * Log the interaction with the AI API.
@@ -161,32 +254,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $action->setValue('message', json_encode($payload));
         $action->setValue('record', 'SecureChatLog');
         $action->save();
-
-//        if($project_id && $requestData["model"] == "gpt-4o" && $log_project_id = $this->getSystemSetting('interaction-log-project-id')){
-//            $usage = $this->extractUsageTokens($responseData);
-//
-//            //TODO NEED TO GET A SUMMARY OF THE INTERACTION EH?
-//            $last_query = array_pop($requestData["messages"]);
-//            $summary = "Q: ". $last_query["content"] . "\n\n" . "A: " . $this->extractResponseText($responseData);
-//
-//            // Prepare data for REDCap
-//            $data = [
-//                'record_id' => $responseData["id"],
-//                'project_id' => $project_id,
-//                'interaction_ts' => date('Y-m-d H:i:s'),
-//                'model' => $responseData["model"],
-//                'input_tokens' => $usage['prompt_tokens'],
-//                'completion_tokens' => $usage['completion_tokens'],
-//                'interaction_summary' => $summary
-//            ];
-//
-//            // Use REDCap's saveData function to save the interaction
-//            $response = \REDCap::saveData($log_project_id, 'json', json_encode([$data]));
-//
-//            if (!empty($response['errors'])) {
-//                $this->emError("Error logging interaction to REDCap: " . json_encode($response['errors']));
-//            }
-//        }
     }
 
     /**
@@ -340,6 +407,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     public function getGuzzleTimeout(): float
     {
         return $this->guzzleTimeout;
+    }
+
+    // New method to get the Whisper API URL
+    public function getApiWhisperUrl()
+    {
+        return $this->getSystemSetting('secure-chat-whisper-api-url');
     }
 }
 ?>

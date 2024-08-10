@@ -1,19 +1,17 @@
 # SecureChat
-SecureChat is an External Module (EM) designed as a service to access Stanford's Instance of OpenAI Models, Secure Chat AI.
+SecureChat is an External Module (EM) designed to access Stanford's instance of OpenAI models, Secure Chat AI.
 
 **Requirement:** Connection to SOM or SHC's VPN.
 
 ## Logging
+Every interaction with the API is logged to `emLogs`, tracking input/output tokens and project ID.
 
-Each interaction with the API can be logged to a configured REDCap project (or Entity Table TBD) by project_id
-An example of a project for Logging: [SecureChatAIEmUsageLog_2024-07-27.REDCap.xml](SecureChatAIEmUsageLog_2024-07-27.REDCap.xml)
-
-## Usage from other Project EM
+## Usage from Other Project EMs
 ```php
 $moduleDirectoryPrefix = "secure_chat_ai"; // Module prefix of your target system-level module
-$messages = [...]; // The data you want to pass to callAI
+$messages = [...]; // Data you want to pass to callAI
 $params = [...];
-$model = "gpt-4o" // or "ada-002" for embeddings
+$model = "gpt-4o"; // or "ada-002" for embeddings
 $em = \ExternalModules\ExternalModules::getModuleInstance($moduleDirectoryPrefix);
 $result = $em->callAI($model, $params, $project_id);
 ```
@@ -49,6 +47,22 @@ $input = "What is 2+2?"
 $response = $this->callAI($model, ['input' => $input]);
 ```
 
+## Example call (Whisper - Transcription)
+```php
+$model = "whisper";
+$inputFile = "/path/to/audio/file.wav"; // Path to the audio file
+$params = [
+    'input' => $inputFile,
+    'language' => 'en',
+    'temperature' => 0.0,
+    'format' => 'json',
+    'initial_prompt' => 'Delineate between speakers',
+    'prompt' => 'Make any corrections to misheard speech if possible to deduce'
+];
+$project_id = 108;
+
+$response = $this->callAI($model, $params, $project_id);
+```
 
 
 ## AI Endpoint (ChatML)
@@ -96,36 +110,93 @@ Expected output :
 ]
 ```
 
-## Parameters Glosary (*Configurable in EM Settings)
+## gpt-4o Model Parameters with Default Values (*Configurable in EM Settings)
 
 ### Temperature*
 - **Description**: Controls the randomness of the model's output.
 - **Range**: 0.0 to 1.0
-- **Effect**: Lower values (e.g., 0.2) make the output more deterministic and focused, while higher values (e.g., 0.8) make it more random and creative.
+- **Effect**: Lower values (e.g., 0.2) make the output more deterministic, while higher values (e.g., 0.8) increase randomness.
 
 ### top_p*
-- **Description**: Implements nucleus sampling, which selects tokens with the highest cumulative probability.
+- **Description**: Implements nucleus sampling, selecting tokens with the highest cumulative probability.
 - **Range**: 0.0 to 1.0
-- **Effect**: Lower values (e.g., 0.5) will narrow the token selection to fewer, more likely tokens, while higher values (e.g., 0.9) will broaden the token selection.
+- **Effect**: Lower values (e.g., 0.5) narrow token selection, while higher values (e.g., 0.9) broaden it.
 
 ### frequency_penalty*
-- **Description**: Adjusts the likelihood of a token being used based on its frequency so far.
+- **Description**: Adjusts token usage likelihood based on its frequency so far.
 - **Range**: -2.0 to 2.0
-- **Effect**: Positive values (e.g., 1.0) reduce the model's tendency to repeat the same lines, while negative values (e.g., -1.0) encourage repetition.
+- **Effect**: Positive values reduce repetition, while negative values encourage it.
 
 ### presence_penalty*
-- **Description**: Adjusts the likelihood of a token being used based on its presence so far.
+- **Description**: Adjusts token usage likelihood based on its presence so far.
 - **Range**: -2.0 to 2.0
-- **Effect**: Positive values (e.g., 1.0) reduce the model's tendency to generates new topics, while negative values (e.g., -1.0) encourage the introduction of new topics.
+- **Effect**: Positive values reduce new topic generation, while negative values encourage it.
 
 ### max_tokens*
 - **Description**: Sets the maximum number of tokens to generate.
-- **Range**: 1 to 2048 (depending on the model and the context length)
-- **Effect**: Determines the length of the response. Higher values allow for longer responses, while lower values limit the length.
+- **Range**: 1 to 2048 (depending on model and context length)
+- **Effect**: Determines response length. Higher values allow for longer responses.
 
 ### stop
-- **Description**: A string or array of strings that specify where the model should stop generating further tokens.
+- **Description**: A string or array of strings specifying where the model should stop generating further tokens.
 - **Range**: Any string or array of strings
-- **Effect**: If any of the specified stop sequences are encountered, the model will stop generating further tokens. If `null`, the model continues until it reaches the token limit or a default stopping condition.
+- **Effect**: If any specified stop sequences are encountered, the model stops generating further tokens.
 
+## Whisper Model Parameters with Default Values (*Configurable in EM Settings)
 
+### Language
+- **Key**: `language`
+- **Type**: `string`
+- **Example**: `"en"` (for English)
+- **Default**: None (Must be specified if needed)
+
+### Temperature
+- **Key**: `temperature`
+- **Type**: `float`
+- **Range**: `0.0` to `1.0`
+- **Default**: `0.0`
+- **Description**: Controls the randomness of the transcription. Lower values make the output more deterministic.
+
+### Max Tokens
+- **Key**: `max_tokens`
+- **Type**: `int`
+- **Default**: None (No maximum unless specified)
+- **Description**: Specifies the maximum number of tokens to generate in the transcription.
+
+### Format
+- **Key**: `format`
+- **Type**: `string`
+- **Example**: `"json"`, `"text"`, `"srt"`
+- **Default**: `"json"`
+- **Description**: Specifies the format of the transcription output.
+
+### Temperature Increment On Fallback
+- **Key**: `temperature_increment_on_fallback`
+- **Type**: `float`
+- **Range**: `0.0` to `1.0`
+- **Default**: Not specified (Rarely used)
+
+### Compression Ratio Threshold
+- **Key**: `compression_ratio_threshold`
+- **Type**: `float`
+- **Example**: `2.4`
+- **Default**: None (Optional)
+
+### Log Prob Threshold
+- **Key**: `log_prob_threshold`
+- **Type**: `float`
+- **Example**: `-1.0`
+- **Default**: None (Optional)
+
+### No Speech Threshold
+- **Key**: `no_speech_threshold`
+- **Type**: `float`
+- **Range**: `0.0` to `1.0`
+- **Default**: `0.6`
+- **Description**: If the probability of silence/noise is higher than this threshold, the segment is ignored.
+
+### Condition On Previous Text
+- **Key**: `condition_on_previous_text`
+- **Type**: `boolean`
+- **Default**: `true`
+- **Description**: Whether the model should condition on the previous output when generating the next segment of transcription.
