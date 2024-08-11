@@ -16,8 +16,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     private string $api_ai_url;
     private string $api_embeddings_url;
     private string $api_key;
+    private string $api_whisper_url;
+    private string $api_whisper_key;
 
     private array $defaultParams;
+
     private $guzzleClient = null;
     private $guzzleTimeout = 5.0;
     private $modelConfig = [
@@ -48,9 +51,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         //Set default API variables from system settings
         $this->setApiAiUrl($this->getSystemSetting('secure-chat-api-url'));
         $this->setApiEmbeddingsUrl($this->getSystemSetting('secure-chat-embeddings-api-url'));
-        $this->setApiKey($this->getSystemSetting('secure-chat-api-token'));
+        $this->setApiWhisperUrl($this->getSystemSetting('secure-chat-whisper-api-url'));
 
-        //Set default model parameters
+        $this->setApiKey($this->getSystemSetting('secure-chat-api-token'));
+        $this->setApiWhisperKey($this->getSystemSetting('secure-chat-whisper-api-token'));
+
+        //Set default LLM model parameters
         $this->setDefaultParams([
             'model' => $this->getSystemSetting('gpt-model') ?: 'gpt-4o',
             'temperature' => (float)$this->getSystemSetting('gpt-temperature') ?: 0.7,
@@ -113,72 +119,85 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
                 // Check if the model is 'whisper'
                 if ($model === 'whisper') {
+                    $api_endpoint = $api_endpoint . '&'. $modelConfig['auth_key_name']. '=' . $this->getApiWhisperKey();
+                    $this->emDebug("inside whisper api_endpoint", $api_endpoint, $params);
+
+                    $filePath = $params["input"];
+
+                    // Extract the filename from the path
+                    $filename = basename($filePath);
+
                     // Prepare the multipart data, including the parameters
                     $multipartData = [
                         [
                             'name' => 'file',
-                            'contents' => fopen($params['input'], 'r'),
-                            'filename' => 'recording.mp3' // Set the correct filename and extension
+                            'contents' => fopen($filePath, 'r'),
+                            'filename' => $filename
                         ]
                     ];
 
                     // Add Whisper-specific parameters to the multipart data
+                    if ( !empty($params["initial_prompt"]) ) {
+                        $multipartData[] = [
+                            'name' => 'initial_prompt',
+                            'contents' => $params["initial_prompt"]
+                        ];
+                    }
+                    if ( !empty($params["prompt"]) ) {
+                        $multipartData[] = [
+                            'name' => 'prompt',
+                            'contents' => $params["prompt"]
+                        ];
+                    }
+
                     if ($this->getProjectSetting('whisper-language')) {
                         $multipartData[] = [
                             'name' => 'language',
                             'contents' => $this->getProjectSetting('whisper-language')
                         ];
                     }
-
                     if ($this->getProjectSetting('whisper-temperature') !== null) {
                         $multipartData[] = [
                             'name' => 'temperature',
                             'contents' => (string) $this->getProjectSetting('whisper-temperature')
                         ];
                     }
-
                     if ($this->getProjectSetting('whisper-top-p') !== null) {
                         $multipartData[] = [
                             'name' => 'top_p',
                             'contents' => (string) $this->getProjectSetting('whisper-top-p')
                         ];
                     }
-
                     if ($this->getProjectSetting('whisper-n') !== null) {
                         $multipartData[] = [
                             'name' => 'n',
                             'contents' => (string) $this->getProjectSetting('whisper-n')
                         ];
                     }
-
                     if ($this->getProjectSetting('whisper-logprobs') !== null) {
                         $multipartData[] = [
                             'name' => 'logprobs',
                             'contents' => (string) $this->getProjectSetting('whisper-logprobs')
                         ];
                     }
-
                     if ($this->getProjectSetting('whisper-max-alternate-transcriptions') !== null) {
                         $multipartData[] = [
                             'name' => 'max_alternate_transcriptions',
                             'contents' => (string) $this->getProjectSetting('whisper-max-alternate-transcriptions')
                         ];
                     }
-
                     if ($this->getProjectSetting('whisper-compression-rate') !== null) {
                         $multipartData[] = [
                             'name' => 'compression_rate',
                             'contents' => (string) $this->getProjectSetting('whisper-compression-rate')
                         ];
                     }
-
                     if ($this->getProjectSetting('whisper-sample-rate') !== null) {
                         $multipartData[] = [
                             'name' => 'sample_rate',
                             'contents' => (string) $this->getProjectSetting('whisper-sample-rate')
                         ];
                     }
-
                     if ($this->getProjectSetting('whisper-condition-on-previous-text') !== null) {
                         $multipartData[] = [
                             'name' => 'condition_on_previous_text',
@@ -187,10 +206,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     }
 
                     // Perform the API call for Whisper
-                    $response = $this->getGuzzleClient()->request('POST', $api_endpoint . '?' . $modelConfig['auth_key_name'] . '=' . $this->api_key, [
+                    $response = $this->getGuzzleClient()->request('POST', $api_endpoint, [
                         'headers' => [
-                            'Accept' => 'application/json',
-                            'Content-Type' => 'multipart/form-data'
+                            'Accept' => 'application/json'
                         ],
                         'multipart' => $multipartData,
                         'timeout' => $this->getGuzzleTimeout()
@@ -210,14 +228,15 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
                 $responseData = json_decode($response->getBody(), true);
 
+                $this->emDebug("gpt response" , $responseData);
+
                 // Log interaction (placeholder)
                 $this->logInteraction($project_id, $params, $responseData);
 
                 return $responseData;
-
             } catch (GuzzleException $e) {
                 $attempt++;
-                $this->emError("Attempt $attempt: Guzzle error: " . $e->getMessage());
+                $this->emDebug("Attempt $attempt:  Guzzle error", $e->getResponse()->getBody()->getContents());
 
                 if ($attempt > $retries) {
                     return [
@@ -226,10 +245,10 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     ];
                 }
             } catch (\Exception $e) {
-                $this->emError("Error: in SecureChat: " . $e->getMessage());
+                $this->emError("Error: in SecureChat: " . $e->getResponse()->getBody()->getContents());
                 return [
                     'error' => true,
-                    'message' => "Error in SecureChat: " . $e->getMessage()
+                    'message' => "Error in SecureChat: " . $e->getResponse()->getBody()->getContents()
                 ];
             }
         }
@@ -327,6 +346,19 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $this->api_embeddings_url = $api_embeddings_url;
     }
 
+    public function getApiWhisperUrl()
+    {
+        return $this->api_whisper_url;
+    }
+
+    /**
+     * @param string $api_whisper_url
+     */
+    public function setApiWhisperUrl(string $api_whisper_url): void
+    {
+        $this->api_whisper_url = $api_whisper_url;
+    }
+
     /**
      * @return string
      */
@@ -342,6 +374,23 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     {
         $this->api_key = $api_key;
     }
+
+    /**
+     * @return string
+     */
+    public function getApiWhisperKey()
+    {
+        return $this->api_whisper_key;
+    }
+
+    /**
+     * @param string $api_key
+     */
+    public function setApiWhisperKey(string $api_key): void
+    {
+        $this->api_whisper_key = $api_key;
+    }
+
 
     /**
      * @return array
@@ -367,7 +416,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         if (!$this->guzzleClient) {
             $this->setGuzzleClient(new Client([
                 'timeout' => 30,
-                'connect_timeout' => 5,
+                'connect_timeout' => 10,
                 'verify' => false
             ]));
         }
@@ -407,12 +456,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     public function getGuzzleTimeout(): float
     {
         return $this->guzzleTimeout;
-    }
-
-    // New method to get the Whisper API URL
-    public function getApiWhisperUrl()
-    {
-        return $this->getSystemSetting('secure-chat-whisper-api-url');
     }
 }
 ?>
