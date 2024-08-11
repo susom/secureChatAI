@@ -123,20 +123,22 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     $this->emDebug("inside whisper api_endpoint", $api_endpoint, $params);
 
                     $filePath = $params["input"];
-
-                    // Extract the filename from the path
                     $filename = basename($filePath);
+                    $fileResource = fopen($filePath, 'r');
 
-                    // Prepare the multipart data, including the parameters
+                    // Prepare the multipart data
                     $multipartData = [
                         [
                             'name' => 'file',
-                            'contents' => fopen($filePath, 'r'),
+                            'contents' => $fileResource,
                             'filename' => $filename
                         ]
                     ];
 
+                    $this->emDebug("inside whisper api_endpoint", $multipartData);
+
                     // Add Whisper-specific parameters to the multipart data
+                    // ARE THESE REAL Model PARAMETERS OR HALLUCINATIONs?
                     if ( !empty($params["initial_prompt"]) ) {
                         $multipartData[] = [
                             'name' => 'initial_prompt',
@@ -205,13 +207,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         ];
                     }
 
+                    $this->emDebug("guzzle timeout", $this->getGuzzleTimeout());
                     // Perform the API call for Whisper
                     $response = $this->getGuzzleClient()->request('POST', $api_endpoint, [
                         'headers' => [
                             'Accept' => 'application/json'
                         ],
                         'multipart' => $multipartData,
-                        'timeout' => $this->getGuzzleTimeout()
+                        'timeout' => 300
                     ]);
                 } else {
                     // Handling for other models like GPT-4o
@@ -222,7 +225,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                             'Accept' => 'application/json'
                         ],
                         'json' => $data,
-                        'timeout' => $this->getGuzzleTimeout()
+                        'timeout' => $this->getGuzzleTimeout(),
+                        'debug' => true
                     ]);
                 }
 
