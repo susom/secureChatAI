@@ -225,8 +225,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                             'Accept' => 'application/json'
                         ],
                         'json' => $data,
-                        'timeout' => $this->getGuzzleTimeout(),
-                        'debug' => true
+                        'timeout' => $this->getGuzzleTimeout()
                     ]);
                 }
 
