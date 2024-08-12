@@ -58,13 +58,14 @@ class SecureChatLog extends ASEMLO
      * Load the active conversation after action_id
      * @param SecureChatAI $module
      * @param int $project_id
+     * @param int $offset
      * @return array Action
      * @throws \Exception
      */
-    public static function getLogs($module, $project_id)
+    public static function getLogs($module, $project_id, $offset)
     {
 
-        $filter_clause = "project_id = ? order by log_id asc";
+        $filter_clause = "project_id = ? order by log_id asc limit 1000 offset $offset";
         $objs = self::queryObjects(
             $module, $filter_clause, [$project_id]
         );

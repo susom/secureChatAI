@@ -92,8 +92,8 @@ function createTable($action, $index) {
 
             </tr>";
 }
-
-$a = $module->getSecureChatLogs();
+$offset = 0;
+$a = $module->getSecureChatLogs($offset);
 $rows = '';
 foreach ($a as $index => $v) {
     $action = $v->getLog();
@@ -139,7 +139,7 @@ foreach ($a as $index => $v) {
             word-wrap: break-word;
         }
 
-        /* Adjust ID and Project ID columns to 5% width */
+        /* Adjust ID and Project ID columns to 5% width */Giver
         .id-column, .project-id-column {
             width: 5%;
             overflow: hidden;
@@ -154,15 +154,14 @@ foreach ($a as $index => $v) {
         }
 
         /* Adjust other columns to split the remaining width */
-        .table td:not(.query-column):not(.response-column):not(.id-column):not(.project-id-column),
         .table th:not(.query-column):not(.response-column):not(.id-column):not(.project-id-column) {
-            /*width: 10%;*/
+            width: 9%;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
         .scrollable-content {
-            max-height: 150px;  /* Set the maximum height */
+            max-height: 120px;  /* Set the maximum height */
             /*max-width: 20%;*/
             overflow-y: auto;   /* Enable vertical scrolling */
             white-space: pre-wrap; /* Preserve whitespace and line breaks */
@@ -193,6 +192,15 @@ foreach ($a as $index => $v) {
 
 <script>
     $(document).ready(function() {
+        $.fn.dataTable.ext.order['tokens-sort'] = function(settings, col) {
+            return this.api().column(col, { order: 'index' }).nodes().map(function(td, i) {
+                // Extract the total tokens from the column data
+                var totalTokens = $(td).find('.accordion-button').text().match(/Total: (\d+)/);
+                console.log(totalTokens ? parseInt(totalTokens[1], 10) : 0)
+                return totalTokens ? parseInt(totalTokens[1], 10) : 0;
+            });
+        };
+
         $('#logTable').DataTable({
             "paging": true,
             "lengthChange": true,
@@ -202,7 +210,13 @@ foreach ($a as $index => $v) {
             "autoWidth": false,
             "fixedColumns": true,
             "pageLength": 10,
-            "lengthMenu": [10, 25, 50, 75, 100]
+            "lengthMenu": [10, 25, 50, 75, 100],
+            "columnDefs": [
+                {
+                    "targets": 4,    // The "Tokens" column
+                    "orderDataType": "tokens-sort"
+                }
+            ]
         });
     });
 </script>
