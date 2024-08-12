@@ -16,8 +16,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     private string $api_ai_url;
     private string $api_embeddings_url;
     private string $api_key;
-    private string $api_whisper_url;
-    private string $api_whisper_key;
+    private ?string $api_whisper_url;
+    private ?string $api_whisper_key;
 
     private array $defaultParams;
 
@@ -76,10 +76,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     /**
      * @return array
+     * @params $offset array offset
      * @throws \Exception
      */
-    public function getSecureChatLogs(){
-        return SecureChatLog::getLogs($this, '52');
+    public function getSecureChatLogs($offset){
+        $offset = intval($offset);
+        return SecureChatLog::getLogs($this, '52', $offset);
     }
 
     /**
@@ -138,74 +140,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     $this->emDebug("inside whisper api_endpoint", $multipartData);
 
                     // Add Whisper-specific parameters to the multipart data
-                    // ARE THESE REAL Model PARAMETERS OR HALLUCINATIONs?
-                    if ( !empty($params["initial_prompt"]) ) {
-                        $multipartData[] = [
-                            'name' => 'initial_prompt',
-                            'contents' => $params["initial_prompt"]
-                        ];
-                    }
-                    if ( !empty($params["prompt"]) ) {
-                        $multipartData[] = [
-                            'name' => 'prompt',
-                            'contents' => $params["prompt"]
-                        ];
-                    }
-
-                    if ($this->getProjectSetting('whisper-language')) {
-                        $multipartData[] = [
-                            'name' => 'language',
-                            'contents' => $this->getProjectSetting('whisper-language')
-                        ];
-                    }
-                    if ($this->getProjectSetting('whisper-temperature') !== null) {
-                        $multipartData[] = [
-                            'name' => 'temperature',
-                            'contents' => (string) $this->getProjectSetting('whisper-temperature')
-                        ];
-                    }
-                    if ($this->getProjectSetting('whisper-top-p') !== null) {
-                        $multipartData[] = [
-                            'name' => 'top_p',
-                            'contents' => (string) $this->getProjectSetting('whisper-top-p')
-                        ];
-                    }
-                    if ($this->getProjectSetting('whisper-n') !== null) {
-                        $multipartData[] = [
-                            'name' => 'n',
-                            'contents' => (string) $this->getProjectSetting('whisper-n')
-                        ];
-                    }
-                    if ($this->getProjectSetting('whisper-logprobs') !== null) {
-                        $multipartData[] = [
-                            'name' => 'logprobs',
-                            'contents' => (string) $this->getProjectSetting('whisper-logprobs')
-                        ];
-                    }
-                    if ($this->getProjectSetting('whisper-max-alternate-transcriptions') !== null) {
-                        $multipartData[] = [
-                            'name' => 'max_alternate_transcriptions',
-                            'contents' => (string) $this->getProjectSetting('whisper-max-alternate-transcriptions')
-                        ];
-                    }
-                    if ($this->getProjectSetting('whisper-compression-rate') !== null) {
-                        $multipartData[] = [
-                            'name' => 'compression_rate',
-                            'contents' => (string) $this->getProjectSetting('whisper-compression-rate')
-                        ];
-                    }
-                    if ($this->getProjectSetting('whisper-sample-rate') !== null) {
-                        $multipartData[] = [
-                            'name' => 'sample_rate',
-                            'contents' => (string) $this->getProjectSetting('whisper-sample-rate')
-                        ];
-                    }
-                    if ($this->getProjectSetting('whisper-condition-on-previous-text') !== null) {
-                        $multipartData[] = [
-                            'name' => 'condition_on_previous_text',
-                            'contents' => $this->getProjectSetting('whisper-condition-on-previous-text') ? 'true' : 'false'
-                        ];
-                    }
+                    $this->addWhisperParameters($multipartData, $params);
 
                     $this->emDebug("guzzle timeout", $this->getGuzzleTimeout());
                     // Perform the API call for Whisper
@@ -257,6 +192,47 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
     }
 
+    /*
+     * Adds whisper parameters to multipart data array
+     */
+    private function addWhisperParameters(&$multipartData, $params): void
+    {
+        $fields = [
+            'initial_prompt',
+            'prompt'
+        ];
+
+        foreach ($fields as $field) {
+            if (!empty($params[$field])) {
+                $multipartData[] = [
+                    'name' => $field,
+                    'contents' => $params[$field]
+                ];
+            }
+        }
+
+        $settings = [
+            'whisper-language' => 'language',
+            'whisper-temperature' => 'temperature',
+            'whisper-top-p' => 'top_p',
+            'whisper-n' => 'n',
+            'whisper-logprobs' => 'logprobs',
+            'whisper-max-alternate-transcriptions' => 'max_alternate_transcriptions',
+            'whisper-compression-rate' => 'compression_rate',
+            'whisper-sample-rate' => 'sample_rate',
+            'whisper-condition-on-previous-text' => 'condition_on_previous_text'
+        ];
+
+        foreach ($settings as $settingKey => $fieldName) {
+            $value = $this->getProjectSetting($settingKey);
+            if ($value !== null) {
+                $multipartData[] = [
+                    'name' => $fieldName,
+                    'contents' => is_bool($value) ? ($value ? 'true' : 'false') : (string) $value
+                ];
+            }
+        }
+    }
 
     /**
      * Log the interaction with the AI API.
@@ -342,9 +318,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     }
 
     /**
-     * @param string $api_embeddings_url
+     * @param ?string $api_embeddings_url
      */
-    public function setApiEmbeddingsUrl(string $api_embeddings_url): void
+    public function setApiEmbeddingsUrl(?string $api_embeddings_url): void
     {
         $this->api_embeddings_url = $api_embeddings_url;
     }
@@ -355,9 +331,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     }
 
     /**
-     * @param string $api_whisper_url
+     * @param ?string $api_whisper_url
      */
-    public function setApiWhisperUrl(string $api_whisper_url): void
+    public function setApiWhisperUrl(?string $api_whisper_url): void
     {
         $this->api_whisper_url = $api_whisper_url;
     }
@@ -387,9 +363,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     }
 
     /**
-     * @param string $api_key
+     * @param ?string $api_key
      */
-    public function setApiWhisperKey(string $api_key): void
+    public function setApiWhisperKey(?string $api_key): void
     {
         $this->api_whisper_key = $api_key;
     }
