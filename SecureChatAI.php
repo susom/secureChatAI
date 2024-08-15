@@ -52,7 +52,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $this->setApiAiUrl($this->getSystemSetting('secure-chat-api-url'));
         $this->setApiEmbeddingsUrl($this->getSystemSetting('secure-chat-embeddings-api-url'));
         $this->setApiWhisperUrl($this->getSystemSetting('secure-chat-whisper-api-url'));
-
         $this->setApiKey($this->getSystemSetting('secure-chat-api-token'));
         $this->setApiWhisperKey($this->getSystemSetting('secure-chat-whisper-api-token'));
 
@@ -67,10 +66,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'stop' => null  // Assuming stop is not configurable and kept at default
         ]);
 
-        //Set guzzle timeout
+        //Set guzzle info
         $timeout = $this->getProjectSetting('guzzle-timeout') ? (float)(strip_tags($this->getProjectSetting('guzzle-timeout'))) : $this->getGuzzleTimeout();
         $this->setGuzzleTimeout($timeout);
-
         $this->guzzleClient = $this->getGuzzleClient();
     }
 
