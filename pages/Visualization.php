@@ -15,6 +15,12 @@ function createTable($action, $index) {
     $queryDump = print_r($action['messages'], true);
     $responseDump = str_replace('\\', '', $action['choices'][0]['message']['content']);
 
+       // Unique IDs for each accordion based on row and column index
+    $tokensId = "collapse-tokens-{$index}";
+    $metaId = "collapse-meta-{$index}";
+    $queryId = "collapse-query-{$index}";
+    $responseId = "collapse-response-{$index}";
+
     return "<tr>
                 <td class='id-column'>{$id}</td>
                 <td class='project-id-column'>{$project_id}</td>
@@ -23,12 +29,12 @@ function createTable($action, $index) {
                 <td>
                     <div class='accordion' id='accordionTokens-{$index}'>
                         <div class='accordion-item'>
-                            <h2 class='accordion-header' id='heading-{$index}'>
-                                <button class='accordion-button collapsed' type='button' data-bs-toggle='collapse' data-bs-target='#collapse-{$index}' aria-expanded='false' aria-controls='collapse-{$index}'>
+                            <h2 class='accordion-header' id='heading-tokens-{$index}'>
+                                <button class='accordion-button collapsed' type='button' data-bs-toggle='collapse' data-bs-target='#{$tokensId}' aria-expanded='false' aria-controls='{$tokensId}'>
                                     Total: {$totalTokens}
                                 </button>
                             </h2>
-                            <div id='collapse-{$index}' class='accordion-collapse collapse' aria-labelledby='heading-{$index}' data-bs-parent='#accordionTokens-{$index}'>
+                            <div id='{$tokensId}' class='accordion-collapse collapse' aria-labelledby='heading-tokens-{$index}' data-bs-parent='#accordionTokens-{$index}'>
                                 <div class='accordion-body'>
                                     <div>Prompt Tokens: {$promptTokens}</div>
                                     <div>Completion Tokens: {$completionTokens}</div>
@@ -37,18 +43,16 @@ function createTable($action, $index) {
                         </div>
                     </div>
                 </td>
-
                 <td>
                     <div class='accordion' id='accordionMeta-{$index}'>
                         <div class='accordion-item'>
-                            <h2 class='accordion-header' id='heading-{$index}'>
-                                <button class='accordion-button collapsed' type='button' data-bs-toggle='collapse' data-bs-target='#collapse-{$index}' aria-expanded='false' aria-controls='collapse-{$index}'>
-                                    Expand
-                                </button>
+                            <h2 class='accordion-header' id='heading-meta-{$index}'>
+                                <div class='accordion-button collapsed' type='button' data-bs-toggle='collapse' data-bs-target='#{$metaId}' aria-expanded='false' aria-controls='{$metaId}'>
+                                    Temp: {$action['temperature']}
+                                </div>
                             </h2>
-                            <div id='collapse-{$index}' class='accordion-collapse collapse' aria-labelledby='heading-{$index}' data-bs-parent='#accordionMeta-{$index}'>
+                            <div id='{$metaId}' class='accordion-collapse collapse' aria-labelledby='heading-meta-{$index}' data-bs-parent='#accordionMeta-{$index}'>
                                 <div class='accordion-body'>
-                                    <div><strong>Temperature:</strong> {$action['temperature']}</div>
                                     <div><strong>Top P:</strong> {$action['top_p']}</div>
                                     <div><strong>Frequency Penalty:</strong> {$action['frequency_penalty']}</div>
                                     <div><strong>Presence Penalty:</strong> {$action['presence_penalty']}</div>
@@ -60,12 +64,12 @@ function createTable($action, $index) {
                 <td class='query-column'>
                     <div class='accordion' id='accordionQuery-{$index}'>
                         <div class='accordion-item'>
-                            <h2 class='accordion-header' id='heading-{$index}'>
-                                <button class='accordion-button collapsed' type='button' data-bs-toggle='collapse' data-bs-target='#collapse-{$index}' aria-expanded='false' aria-controls='collapse-{$index}'>
-                                    Expand
+                            <h2 class='accordion-header' id='heading-query-{$index}'>
+                                <button class='accordion-button collapsed' type='button' data-bs-toggle='collapse' data-bs-target='#{$queryId}' aria-expanded='false' aria-controls='{$queryId}'>
+                                    Expand ...
                                 </button>
                             </h2>
-                            <div id='collapse-{$index}' class='accordion-collapse collapse' aria-labelledby='heading-{$index}' data-bs-parent='#accordionMeta-{$index}'>
+                            <div id='{$queryId}' class='accordion-collapse collapse' aria-labelledby='heading-query-{$index}' data-bs-parent='#accordionQuery-{$index}'>
                                 <div class='accordion-body'>
                                     <pre class='scrollable-content'><?= htmlspecialchars($queryDump) ?></pre>
                                 <div>
@@ -76,12 +80,12 @@ function createTable($action, $index) {
                 <td class='response-column'>
                     <div class='accordion' id='accordionResponse-{$index}'>
                         <div class='accordion-item'>
-                            <h2 class='accordion-header' id='heading-{$index}'>
-                                <button class='accordion-button collapsed' type='button' data-bs-toggle='collapse' data-bs-target='#collapse-{$index}' aria-expanded='false' aria-controls='collapse-{$index}'>
-                                    Expand
+                            <h2 class='accordion-header' id='heading-response-{$index}'>
+                                <button class='accordion-button collapsed' type='button' data-bs-toggle='collapse' data-bs-target='#{$responseId}' aria-expanded='false' aria-controls='{$responseId}'>
+                                    Expand ...
                                 </button>
                             </h2>
-                            <div id='collapse-{$index}' class='accordion-collapse collapse' aria-labelledby='heading-{$index}' data-bs-parent='#accordionMeta-{$index}'>
+                            <div id='{$responseId}' class='accordion-collapse collapse' aria-labelledby='heading-response-{$index}' data-bs-parent='#accordionResponse-{$index}'>
                                 <div class='accordion-body'>
                                     <pre class='scrollable-content'>{$responseDump}</pre>
                                 </div>
@@ -89,7 +93,6 @@ function createTable($action, $index) {
                         </div>
                     </div>
                 </td>
-
             </tr>";
 }
 $offset = 0;
@@ -166,6 +169,17 @@ foreach ($a as $index => $v) {
             overflow-y: auto;   /* Enable vertical scrolling */
             white-space: pre-wrap; /* Preserve whitespace and line breaks */
         }
+        /* Change cursor and background color on row hover */
+        #logTable tbody tr:hover,
+        #logTable tbody td:hover {
+            background-color: #f2f2f2 !important; /* Light grey background on hover */
+            cursor: pointer;
+        }
+
+        /* Ensure individual cells do not override the row hover effect */
+        #logTable tbody td {
+            background-color: inherit; /* Inherit background color from row hover */
+        }
     </style>
 </head>
 <body>
@@ -196,7 +210,6 @@ foreach ($a as $index => $v) {
             return this.api().column(col, { order: 'index' }).nodes().map(function(td, i) {
                 // Extract the total tokens from the column data
                 var totalTokens = $(td).find('.accordion-button').text().match(/Total: (\d+)/);
-                console.log(totalTokens ? parseInt(totalTokens[1], 10) : 0)
                 return totalTokens ? parseInt(totalTokens[1], 10) : 0;
             });
         };
@@ -218,8 +231,31 @@ foreach ($a as $index => $v) {
                 }
             ]
         });
+        // Prevent accordion button click from triggering the row click event
+        $('#logTable').on("click", ".accordion-button", function(event) {
+            event.stopPropagation();
+        });
+
+        // Expand the accordion when a table row cell is clicked
+        $('#logTable').on("click", "tbody td", function() {
+            let accordionButtons = $(this).parent("tr").find('.accordion-button');
+
+            // Iterate over each accordion button in the row
+            accordionButtons.each(function() {
+                let button = $(this);
+                let target = button.attr('data-bs-target');
+                let isCollapsed = button.hasClass('collapsed');
+                // Toggle the collapsed class and accordion
+                if (isCollapsed) {
+                    button.removeClass('collapsed')
+                    $(target).addClass('show').collapse('show');
+                } else {
+                    button.addClass('collapsed').attr('aria-expanded', false);
+                    $(target).removeClass('show').collapse('hide');
+                }
+            });
+        });
     });
 </script>
-
 </body>
 </html>
