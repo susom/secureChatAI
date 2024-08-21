@@ -94,7 +94,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      */
     public function callAI($model, $params = [], $project_id = null)
     {
-        $this->emDebug("in CallAI", $model, $params, $project_id);
         $retries = 2;  // Maximum number of retries
         $attempt = 0;
 
@@ -172,7 +171,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                             'Accept' => 'application/json'
                         ],
                         'json' => $data,
-                        'timeout' => $this->getGuzzleTimeout()
+                        'timeout' => 10
                     ]);
                 }
 
