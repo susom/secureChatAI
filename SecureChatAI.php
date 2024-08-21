@@ -15,8 +15,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     private string $api_ai_url;
     private string $api_embeddings_url;
-    private string $api_key;
     private ?string $api_whisper_url;
+    private string $api_key;
+    private string $api_embeddings_key;
     private ?string $api_whisper_key;
 
     private array $defaultParams;
@@ -32,7 +33,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         'ada-002' => [
             'endpoint' => 'getApiEmbeddingsUrl',
             'required' => ['input'],
-            'auth_key_name' => 'subscription-key'
+            'auth_key_name' => 'api-key'
         ],
         'whisper' => [
             'endpoint' => 'getApiWhisperUrl',
@@ -53,6 +54,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $this->setApiEmbeddingsUrl($this->getSystemSetting('secure-chat-embeddings-api-url'));
         $this->setApiWhisperUrl($this->getSystemSetting('secure-chat-whisper-api-url'));
         $this->setApiKey($this->getSystemSetting('secure-chat-api-token'));
+        $this->setApiEmbeddingsKey($this->getSystemSetting('secure-chat-embeddings-api-token'));
         $this->setApiWhisperKey($this->getSystemSetting('secure-chat-whisper-api-token'));
 
         //Set default LLM model parameters
@@ -92,6 +94,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      */
     public function callAI($model, $params = [], $project_id = null)
     {
+        $this->emDebug("in CallAI", $model, $params, $project_id);
         $retries = 2;  // Maximum number of retries
         $attempt = 0;
 
@@ -99,7 +102,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             try {
                 // Ensure the secure chat AI is initialized
                 $this->initSecureChatAI();
-
                 $config = $this->getModelConfig();
 
                 // Check if model is supported
@@ -150,9 +152,21 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         'timeout' => 300
                     ]);
                 } else {
-                    // Handling for other models like GPT-4o
-                    $data = array_merge($this->getDefaultParams(), $params);
-                    $response = $this->getGuzzleClient()->request('POST', $api_endpoint . '&' . $modelConfig['auth_key_name'] . '=' . $this->api_key, [
+                    // Handling for other models like ada-002 , GPT-4o
+                    $params["model"] = $model;
+
+                    // TODO WILL NEED WAY TO GENERALIZE THIS OUT, wiht more deployments... or maybe this is as good as it gets
+                    if($model == "gpt-4o"){
+                        $data = array_merge($this->getDefaultParams(), $params);
+                        $api_key = $this->getApiKey();
+                    }else {
+                        // for now ada-002
+                        $data = $params;
+                        $api_key = $this->getApiEmbeddingsKey();
+                    }
+
+                    $api_url = $api_endpoint . '&' . $modelConfig['auth_key_name'] . '=' . $api_key;
+                    $response = $this->getGuzzleClient()->request('POST', $api_url, [
                         'headers' => [
                             'Content-Type' => 'application/json',
                             'Accept' => 'application/json'
@@ -163,7 +177,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 }
 
                 $responseData = json_decode($response->getBody(), true);
-
                 $this->emDebug("gpt response" , $responseData);
 
                 // Log interaction (placeholder)
@@ -350,6 +363,22 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     public function setApiKey(string $api_key): void
     {
         $this->api_key = $api_key;
+    }
+
+    /**
+     * @return string
+     */
+    public function getApiEmbeddingsKey()
+    {
+        return $this->api_embeddings_key;
+    }
+
+    /**
+     * @param string $api_key
+     */
+    public function setApiEmbeddingsKey(string $api_key): void
+    {
+        $this->api_embeddings_key = $api_key;
     }
 
     /**

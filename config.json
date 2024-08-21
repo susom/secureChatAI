@@ -66,7 +66,13 @@
         },
         {
             "key": "secure-chat-api-token",
-            "name": "<b>Api Token</b> for LLM & Embeddings",
+            "name": "<b>Api Token</b> for LLM",
+            "required": false,
+            "type": "text"
+        },
+        {
+            "key": "secure-chat-embeddings-api-token",
+            "name": "<b>Api Token</b> for Embeddings",
             "required": false,
             "type": "text"
         },
