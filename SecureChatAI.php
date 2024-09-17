@@ -178,26 +178,32 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 $responseData = json_decode($response->getBody(), true);
                 $this->emDebug("gpt response" , $responseData);
 
-                // Log interaction (placeholder)
+                // Log interaction of user and response queries
                 $this->logInteraction($project_id, $params, $responseData);
 
                 return $responseData;
             } catch (GuzzleException $e) {
                 $attempt++;
-                $this->emDebug("Attempt $attempt:  Guzzle error", $e->getResponse()->getBody()->getContents());
+                $this->emDebug("Attempt $attempt:  Guzzle error", $e->getMessage());
 
                 if ($attempt > $retries) {
-                    return [
+                    $error = [
                         'error' => true,
                         'message' => "Guzzle error after $retries retries: " . $e->getMessage()
                     ];
+                    // Log interaction and error
+                    $this->logErrorInteraction($project_id, $params, $error);
+                    return $error;
                 }
             } catch (\Exception $e) {
-                $this->emError("Error: in SecureChat: " . $e->getResponse()->getBody()->getContents());
-                return [
+                $this->emError("Error: in SecureChat: " . $e->getMessage());
+                $error = [
                     'error' => true,
-                    'message' => "Error in SecureChat: " . $e->getResponse()->getBody()->getContents()
+                    'message' => "Error in SecureChat: " . $e->getMessage()
                 ];
+                // Log interaction and error
+                $this->logErrorInteraction($project_id, $params, $error);
+                return $error;
             }
         }
     }
@@ -261,6 +267,17 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // Message capacity is currently ~16mb or 16 million characters
         $action->setValue('message', json_encode($payload));
         $action->setValue('record', 'SecureChatLog');
+        $action->save();
+    }
+
+    private function logErrorInteraction($project_id, $requestData, $error){
+        $payload = array_merge($requestData, $error);
+        $payload['project_id'] = $project_id;
+        $action = new SecureChatLog($this);
+
+        // Message capacity is currently ~16mb or 16 million characters
+        $action->setValue('message', json_encode($error));
+        $action->setValue('record', 'SecureChatLogError');
         $action->save();
     }
 
@@ -461,6 +478,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     public function getGuzzleTimeout(): float
     {
         return $this->guzzleTimeout;
+    }
+
+    public function getSecureChatLogObject()
+    {
+        return new SecureChatLog($this);
     }
 }
 ?>
