@@ -118,95 +118,86 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     }
                 }
 
-                // Check if the model is 'whisper'
-                if ($model === 'whisper') {
-                    $api_endpoint = $api_endpoint . '&'. $modelConfig['auth_key_name']. '=' . $this->getApiWhisperKey();
-                    $this->emDebug("inside whisper api_endpoint", $api_endpoint, $params);
+                // Build the cURL request
+                $ch = curl_init();
 
-                    $filePath = $params["input"];
-                    $filename = basename($filePath);
-                    $fileResource = fopen($filePath, 'r');
-
-                    // Prepare the multipart data
-                    $multipartData = [
-                        [
-                            'name' => 'file',
-                            'contents' => $fileResource,
-                            'filename' => $filename
-                        ]
-                    ];
-
-                    $this->emDebug("inside whisper api_endpoint", $multipartData);
-
-                    // Add Whisper-specific parameters to the multipart data
-                    $this->addWhisperParameters($multipartData, $params);
-
-                    $this->emDebug("guzzle timeout", $this->getGuzzleTimeout());
-                    // Perform the API call for Whisper
-                    $response = $this->getGuzzleClient()->request('POST', $api_endpoint, [
-                        'headers' => [
-                            'Accept' => 'application/json'
-                        ],
-                        'multipart' => $multipartData,
-                        'timeout' => 300
-                    ]);
+                // Prepare API key and URL
+                if ($model === "gpt-4o") {
+                    $data = array_merge($this->getDefaultParams(), $params);
+                    $api_key = $this->getApiKey();
+                } else if ($model === "ada-002") {
+                    $data = $params;
+                    $api_key = $this->getApiEmbeddingsKey();
+                } else if ($model === "whisper") {
+                    $api_key = $this->getApiWhisperKey();
+                    $data = $params; // Whisper expects different input (already handled elsewhere)
                 } else {
-                    // Handling for other models like ada-002 , GPT-4o
-                    $params["model"] = $model;
-
-                    // TODO WILL NEED WAY TO GENERALIZE THIS OUT, wiht more deployments... or maybe this is as good as it gets
-                    if($model == "gpt-4o"){
-                        $data = array_merge($this->getDefaultParams(), $params);
-                        $api_key = $this->getApiKey();
-                    }else {
-                        // for now ada-002
-                        $data = $params;
-                        $api_key = $this->getApiEmbeddingsKey();
-                    }
-
-                    $api_url = $api_endpoint . '&' . $modelConfig['auth_key_name'] . '=' . $api_key;
-                    $response = $this->getGuzzleClient()->request('POST', $api_url, [
-                        'headers' => [
-                            'Content-Type' => 'application/json',
-                            'Accept' => 'application/json'
-                        ],
-                        'json' => $data,
-                        'timeout' => 10
-                    ]);
+                    throw new Exception('Unsupported model: ' . $model);
                 }
 
-                $responseData = json_decode($response->getBody(), true);
-                $this->emDebug("gpt response" , $responseData);
+                $api_url = $api_endpoint . '&' . $modelConfig['auth_key_name'] . '=' . $api_key;
+
+                // Set the cURL options
+                curl_setopt($ch, CURLOPT_URL, $api_url);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                    'Content-Type: application/json',
+                    'Accept: application/json'
+                ]);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+
+                // Add the JSON body
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+
+                // Inject the Resolve Array (for DNS mapping)
+                curl_setopt($ch, CURLOPT_RESOLVE, [
+                    'apim.stanfordhealthcare.org:443:10.249.134.5',
+                    'som-redcap-whisper.openai.azure.com:443:10.153.192.4',
+                    'som-redcap.openai.azure.com:443:10.249.50.7'
+                ]);
+
+                // Execute the request
+                $response = curl_exec($ch);
+                $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+                if (curl_errno($ch)) {
+                    throw new Exception('cURL error: ' . curl_error($ch));
+                }
+
+                if ($http_code < 200 || $http_code >= 300) {
+                    throw new Exception('HTTP error: ' . $http_code . ' - Response: ' . $response);
+                }
+
+                // Close cURL
+                curl_close($ch);
+
+                // Parse the response
+                $responseData = json_decode($response, true);
+                $this->emDebug("gpt response", $responseData);
 
                 // Log interaction of user and response queries
                 $this->logInteraction($project_id, $params, $responseData);
 
                 return $responseData;
-            } catch (GuzzleException $e) {
+            } catch (\Exception $e) {
                 $attempt++;
-                $this->emDebug("Attempt $attempt:  Guzzle error", $e->getMessage());
+                $this->emDebug("Attempt $attempt: Error", $e->getMessage());
+
 
                 if ($attempt > $retries) {
                     $error = [
                         'error' => true,
-                        'message' => "Guzzle error after $retries retries: " . $e->getMessage()
+                        'message' => "Error after $retries retries: " . $e->getMessage()
                     ];
                     // Log interaction and error
                     $this->logErrorInteraction($project_id, $params, $error);
                     return $error;
                 }
-            } catch (\Exception $e) {
-                $this->emError("Error: in SecureChat: " . $e->getMessage());
-                $error = [
-                    'error' => true,
-                    'message' => "Error in SecureChat: " . $e->getMessage()
-                ];
-                // Log interaction and error
-                $this->logErrorInteraction($project_id, $params, $error);
-                return $error;
             }
         }
     }
+
 
     /*
      * Adds whisper parameters to multipart data array
