@@ -89,12 +89,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      *
      * @param string $model The model to be used for the API call.
      * @param array $params Additional parameters to customize the API call.
-     * @param int|null $project_id The project ID for tracking purposes.
+     * @param int|null $project_id The project ID for tracking purposes (optional).
      * @return array The response from the AI API or an error message.
      */
     public function callAI($model, $params = [], $project_id = null)
     {
-        $retries = 2;  // Maximum number of retries
+        $retries = 2; // Maximum number of retries
         $attempt = 0;
 
         while ($attempt <= $retries) {
@@ -118,9 +118,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     }
                 }
 
-                // Build the cURL request
-                $ch = curl_init();
-
                 // Prepare API key and URL
                 if ($model === "gpt-4o") {
                     $data = array_merge($this->getDefaultParams(), $params);
@@ -130,14 +127,15 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     $api_key = $this->getApiEmbeddingsKey();
                 } else if ($model === "whisper") {
                     $api_key = $this->getApiWhisperKey();
-                    $data = $params; // Whisper expects different input (already handled elsewhere)
+                    $data = $params;
                 } else {
                     throw new Exception('Unsupported model: ' . $model);
                 }
 
                 $api_url = $api_endpoint . '&' . $modelConfig['auth_key_name'] . '=' . $api_key;
 
-                // Set the cURL options
+                // Set up cURL request
+                $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, $api_url);
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -145,19 +143,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     'Accept: application/json'
                 ]);
                 curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-
-                // Add the JSON body
                 curl_setopt($ch, CURLOPT_POST, true);
                 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-
-                // Inject the Resolve Array (for DNS mapping)
                 curl_setopt($ch, CURLOPT_RESOLVE, [
                     'apim.stanfordhealthcare.org:443:10.249.134.5',
                     'som-redcap-whisper.openai.azure.com:443:10.153.192.4',
                     'som-redcap.openai.azure.com:443:10.249.50.7'
                 ]);
 
-                // Execute the request
                 $response = curl_exec($ch);
                 $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
@@ -169,29 +162,37 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     throw new Exception('HTTP error: ' . $http_code . ' - Response: ' . $response);
                 }
 
-                // Close cURL
                 curl_close($ch);
 
                 // Parse the response
                 $responseData = json_decode($response, true);
                 $this->emDebug("gpt response", $responseData);
 
-                // Log interaction of user and response queries
-                $this->logInteraction($project_id, $params, $responseData);
+                // Log interaction only if project_id is available
+                if (!empty($project_id)) {
+                    $this->logInteraction($project_id, $params, $responseData);
+                } else {
+                    $this->emDebug("Skipping logging due to missing project ID (pid).");
+                }
 
                 return $responseData;
             } catch (\Exception $e) {
                 $attempt++;
                 $this->emDebug("Attempt $attempt: Error", $e->getMessage());
 
-
                 if ($attempt > $retries) {
                     $error = [
                         'error' => true,
                         'message' => "Error after $retries retries: " . $e->getMessage()
                     ];
-                    // Log interaction and error
-                    $this->logErrorInteraction($project_id, $params, $error);
+
+                    // Log error interaction only if project_id is available
+                    if (!empty($project_id)) {
+                        $this->logErrorInteraction($project_id, $params, $error);
+                    } else {
+                        $this->emDebug("Skipping error logging due to missing project ID (pid).");
+                    }
+
                     return $error;
                 }
             }
