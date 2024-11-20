@@ -69,7 +69,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         ]);
 
         //Set guzzle info
-        $timeout = $this->getProjectSetting('guzzle-timeout') ? (float)(strip_tags($this->getProjectSetting('guzzle-timeout'))) : $this->getGuzzleTimeout();
+        $timeout = $this->getSystemSetting('guzzle-timeout') ? (float)(strip_tags($this->getSystemSetting('guzzle-timeout'))) : $this->getGuzzleTimeout();
         $this->setGuzzleTimeout($timeout);
         $this->guzzleClient = $this->getGuzzleClient();
     }
@@ -102,7 +102,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 // Ensure the secure chat AI is initialized
                 $this->initSecureChatAI();
                 $config = $this->getModelConfig();
-
                 // Check if model is supported
                 if (!isset($config[$model])) {
                     throw new Exception('Unsupported model: ' . $model);
@@ -232,7 +231,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         ];
 
         foreach ($settings as $settingKey => $fieldName) {
-            $value = $this->getProjectSetting($settingKey);
+            $value = $this->getSystemSetting($settingKey);
             if ($value !== null) {
                 $multipartData[] = [
                     'name' => $fieldName,
