@@ -109,6 +109,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
                 $modelConfig = $config[$model];
                 $api_endpoint = $this->{$modelConfig['endpoint']}();
+                $auth_key_name = $modelConfig["auth_key_name"];
+                $headers = ['Content-Type: application/json', 'Accept: application/json'];
 
                 // Ensure required parameters are provided
                 foreach ($modelConfig['required'] as $param) {
@@ -121,26 +123,26 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 if ($model === "gpt-4o") {
                     $data = array_merge($this->getDefaultParams(), $params);
                     $api_key = $this->getApiKey();
+                    $api_endpoint .= "&$auth_key_name=$api_key";
                 } else if ($model === "ada-002") {
                     $data = $params;
                     $api_key = $this->getApiEmbeddingsKey();
+                    $headers[] = "$auth_key_name: $api_key";
                 } else if ($model === "whisper") {
                     $api_key = $this->getApiWhisperKey();
                     $data = $params;
+                    $api_endpoint .= "&$auth_key_name=$api_key";
                 } else {
                     throw new Exception('Unsupported model: ' . $model);
                 }
 
-                $api_url = $api_endpoint . '&' . $modelConfig['auth_key_name'] . '=' . $api_key;
+                $api_url = $api_endpoint ;
 
                 // Set up cURL request
                 $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, $api_url);
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                    'Content-Type: application/json',
-                    'Accept: application/json'
-                ]);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
                 curl_setopt($ch, CURLOPT_TIMEOUT, 10);
                 curl_setopt($ch, CURLOPT_POST, true);
                 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
@@ -165,7 +167,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
                 // Parse the response
                 $responseData = json_decode($response, true);
-                $this->emDebug("gpt response", $responseData);
+//                $this->emDebug("gpt response", $responseData);
 
                 // Log interaction only if project_id is available
                 if (!empty($project_id)) {
