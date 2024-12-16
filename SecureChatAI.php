@@ -5,7 +5,7 @@ namespace Stanford\SecureChatAI;
 require_once "emLoggerTrait.php";
 require_once "classes/SecureChatLog.php";
 
-use Google\Exception;
+use Exception;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 
@@ -13,85 +13,58 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 {
     use emLoggerTrait;
 
-    private string $api_ai_url;
-    private string $api_embeddings_url;
-    private ?string $api_whisper_url;
-    private string $api_key;
-    private string $api_embeddings_key;
-    private ?string $api_whisper_key;
-
     private array $defaultParams;
-
     private $guzzleClient = null;
     private $guzzleTimeout = 5.0;
-    private $modelConfig = [
-        'gpt-4o' => [
-            'endpoint' => 'getApiAiUrl',
-            'required' => ['messages'],
-            'auth_key_name' => 'subscription-key'
-        ],
-        'ada-002' => [
-            'endpoint' => 'getApiEmbeddingsUrl',
-            'required' => ['input'],
-            'auth_key_name' => 'api-key'
-        ],
-        'whisper' => [
-            'endpoint' => 'getApiWhisperUrl',
-            'required' => ['input'],
-            'auth_key_name' => 'api-key'
-        ]
-    ];
+    private array $modelConfig = [];
 
     public function __construct()
     {
         parent::__construct();
     }
 
-    public function initSecureChatAI()
+    private function initSecureChatAI()
     {
-        //Set default API variables from system settings
-        $this->setApiAiUrl($this->getSystemSetting('secure-chat-api-url'));
-        $this->setApiEmbeddingsUrl($this->getSystemSetting('secure-chat-embeddings-api-url'));
-        $this->setApiWhisperUrl($this->getSystemSetting('secure-chat-whisper-api-url'));
-        $this->setApiKey($this->getSystemSetting('secure-chat-api-token'));
-        $this->setApiEmbeddingsKey($this->getSystemSetting('secure-chat-embeddings-api-token'));
-        $this->setApiWhisperKey($this->getSystemSetting('secure-chat-whisper-api-token'));
-
-        //Set default LLM model parameters
-        $this->setDefaultParams([
-            'model' => $this->getSystemSetting('gpt-model') ?: 'gpt-4o',
+        // Set default LLM model parameters
+        $this->defaultParams = [
             'temperature' => (float)$this->getSystemSetting('gpt-temperature') ?: 0.7,
             'top_p' => (float)$this->getSystemSetting('gpt-top-p') ?: 0.9,
             'frequency_penalty' => (float)$this->getSystemSetting('gpt-frequency-penalty') ?: 0.5,
             'presence_penalty' => (float)$this->getSystemSetting('gpt-presence-penalty') ?: 0,
             'max_tokens' => (int)$this->getSystemSetting('gpt-max-tokens') ?: 800,
-            'stop' => null  // Assuming stop is not configurable and kept at default
-        ]);
+            'stop' => null,
+            'model' => 'gpt-4o'
+        ];
 
-        //Set guzzle info
+        // Initialize the model configurations from system settings
+        $apiSettings = $this->framework->getSubSettings('api-settings');
+        foreach ($apiSettings as $setting) {
+            $modelAlias = $setting['model-alias'];
+            $this->modelConfig[$modelAlias] = [
+                'api_url' => $setting['api-url'],
+                'api_token' => $setting['api-token'],
+                'api_key_var' => $setting['api-key-var'],
+                'required' => $setting['api-input-var']
+            ];
+
+            if (isset($setting['default-model']) && $setting['default-model']) {
+                $this->defaultParams['model'] = $modelAlias;
+            }
+        }
+
+        // Set Guzzle info
         $timeout = $this->getSystemSetting('guzzle-timeout') ? (float)(strip_tags($this->getSystemSetting('guzzle-timeout'))) : $this->getGuzzleTimeout();
         $this->setGuzzleTimeout($timeout);
         $this->guzzleClient = $this->getGuzzleClient();
     }
 
-    /**
-     * @return array
-     * @params $offset array offset
-     * @throws \Exception
-     */
-    public function getSecureChatLogs($offset){
+    public function getSecureChatLogs($offset)
+    {
         $offset = intval($offset);
         return SecureChatLog::getLogs($this, '52', $offset);
     }
 
-    /**
-     * Call the AI API with the provided messages and parameters.
-     *
-     * @param string $model The model to be used for the API call.
-     * @param array $params Additional parameters to customize the API call.
-     * @param int|null $project_id The project ID for tracking purposes (optional).
-     * @return array The response from the AI API or an error message.
-     */
+
     public function callAI($model, $params = [], $project_id = null)
     {
         $retries = 2; // Maximum number of retries
@@ -101,16 +74,20 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             try {
                 // Ensure the secure chat AI is initialized
                 $this->initSecureChatAI();
-                $config = $this->getModelConfig();
+                $this->emDebug("Initialized SecureChatAI with model", $model);
+
                 // Check if model is supported
-                if (!isset($config[$model])) {
+                if (!isset($this->modelConfig[$model])) {
                     throw new Exception('Unsupported model: ' . $model);
                 }
 
-                $modelConfig = $config[$model];
-                $api_endpoint = $this->{$modelConfig['endpoint']}();
-                $auth_key_name = $modelConfig["auth_key_name"];
-                $headers = ['Content-Type: application/json', 'Accept: application/json'];
+                $modelConfig = $this->modelConfig[$model];
+                $this->emDebug("Loaded model configuration", $modelConfig);
+
+                $api_endpoint = $modelConfig['api_url'];
+                $auth_key_name = $modelConfig['api_key_var'];
+                $api_key = $modelConfig['api_token'];
+                $headers = [];
 
                 // Ensure required parameters are provided
                 foreach ($modelConfig['required'] as $param) {
@@ -119,65 +96,46 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     }
                 }
 
-                // Prepare API key and URL
-                if ($model === "gpt-4o") {
-                    $data = array_merge($this->getDefaultParams(), $params);
-                    $api_key = $this->getApiKey();
-                    $api_endpoint .= "&$auth_key_name=$api_key";
-                } else if ($model === "ada-002") {
-                    $data = $params;
-                    $api_key = $this->getApiEmbeddingsKey();
-                    $headers[] = "$auth_key_name: $api_key";
-                } else if ($model === "whisper") {
-                    $api_key = $this->getApiWhisperKey();
-                    $data = $params;
-                    $api_endpoint .= "&$auth_key_name=$api_key";
-                } else {
-                    throw new Exception('Unsupported model: ' . $model);
+                // Prepare request headers, URL, and payload based on model type
+                switch ($model) {
+                    case 'whisper':
+                        $this->prepareWhisperRequest($params, $api_endpoint, $headers, $api_key);
+                        $postfields = $params;
+                        break;
+
+                    case 'claude':
+                        $this->prepareClaudeRequest($params, $api_endpoint, $headers, $api_key, $postfields);
+                        break;
+
+                    case 'gpt-4o':
+                    case 'ada-002':
+                        $headers = ['Content-Type: application/json', 'Accept: application/json'];
+                        $api_endpoint .= (strpos($api_endpoint, '?') === false ? '?' : '&') . "$auth_key_name=$api_key";
+                        $postfields = json_encode(array_merge($this->defaultParams, $params));
+                        break;
+
+                    default:
+                        throw new Exception("Unsupported model configuration for: $model");
                 }
 
-                $api_url = $api_endpoint ;
-
-                // Set up cURL request
-                $ch = curl_init();
-                curl_setopt($ch, CURLOPT_URL, $api_url);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-                curl_setopt($ch, CURLOPT_RESOLVE, [
-                    'apim.stanfordhealthcare.org:443:10.249.134.5',
-                    'som-redcap-whisper.openai.azure.com:443:10.153.192.4',
-                    'som-redcap.openai.azure.com:443:10.249.50.7'
+                $this->emDebug("Prepared API call", [
+                    'endpoint' => $api_endpoint,
+                    'headers' => $headers,
+                    'postfields' => $postfields ?? null
                 ]);
 
-                $response = curl_exec($ch);
-                $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-                if (curl_errno($ch)) {
-                    throw new Exception('cURL error: ' . curl_error($ch));
-                }
-
-                if ($http_code < 200 || $http_code >= 300) {
-                    throw new Exception('HTTP error: ' . $http_code . ' - Response: ' . $response);
-                }
-
-                curl_close($ch);
-
-                // Parse the response
-                $responseData = json_decode($response, true);
-//                $this->emDebug("gpt response", $responseData);
+                // Execute the API call
+                $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
+                $normalizedResponse = $this->normalizeResponse($responseData, $model);
+                $this->emDebug("Normalized API Response", $normalizedResponse);
 
                 // Log interaction only if project_id is available
-                if (!empty($project_id)) {
+                if ($project_id) {
                     $this->logInteraction($project_id, $params, $responseData);
-                } else {
-                    $this->emDebug("Skipping logging due to missing project ID (pid).");
                 }
 
-                return $responseData;
-            } catch (\Exception $e) {
+                return $normalizedResponse;
+            } catch (Exception $e) {
                 $attempt++;
                 $this->emDebug("Attempt $attempt: Error", $e->getMessage());
 
@@ -188,7 +146,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     ];
 
                     // Log error interaction only if project_id is available
-                    if (!empty($project_id)) {
+                    if ($project_id) {
                         $this->logErrorInteraction($project_id, $params, $error);
                     } else {
                         $this->emDebug("Skipping error logging due to missing project ID (pid).");
@@ -200,10 +158,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
     }
 
-
-    /*
-     * Adds whisper parameters to multipart data array
-     */
     private function addWhisperParameters(&$multipartData, $params): void
     {
         $fields = [
@@ -243,65 +197,157 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
     }
 
-    /**
-     * Log the interaction with the AI API.
-     *
-     * @param int|null $project_id The project ID for tracking purposes.
-     * @param array $requestData The request data sent to the API.
-     * @param array $responseData The response data received from the API.
-     */
+    private function prepareWhisperRequest(&$params, &$api_endpoint, &$headers, $api_key)
+    {
+        // Check if the file parameter exists and validate it as a string before creating a CURLFile object
+        if (!isset($params['file']) || !is_string($params['file']) || !file_exists($params['file'])) {
+            throw new Exception("Whisper: File not found or invalid at path: " . ($params['file'] ?? 'undefined'));
+        }
+
+        $filePath = $params['file']; // Preserve the string file path for logging
+
+        // Set headers for multipart/form-data
+        $headers = ['Content-Type: multipart/form-data', 'Accept: application/json'];
+
+        // Append the API key to the endpoint
+        $auth_key_name = $this->modelConfig['whisper']['api_key_var'] ?? 'api-key';
+        $api_endpoint .= (strpos($api_endpoint, '?') === false ? '?' : '&') . "$auth_key_name=$api_key";
+
+        // Replace the file parameter with a CURLFile object
+        $params = [
+            'file' => curl_file_create($filePath, 'audio/mpeg', basename($filePath)),
+            'language' => $params['language'] ?? 'en',
+            'temperature' => $params['temperature'] ?? '0.0',
+            'format' => $params['format'] ?? 'json'
+        ];
+    }
+
+    private function prepareClaudeRequest(&$params, &$api_endpoint, &$headers, $api_key, &$postfields)
+    {
+        $auth_key_name = $this->modelConfig['claude']['api_key_var'] ?? 'Ocp-Apim-Subscription-Key';
+        $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
+        $prompt_text = isset($params['messages']) ? $this->formatMessagesForClaude($params['messages']) : ($params['prompt_text'] ?? '');
+
+        if (empty($prompt_text)) {
+            throw new Exception('Claude API requires prompt_text in the request body.');
+        }
+
+        $postfields = json_encode([
+            "model_id" => "anthropic.claude-3-5-sonnet-20241022-v2:0",
+            "prompt_text" => $prompt_text
+        ]);
+    }
+
+    private function executeApiCall($api_endpoint, $headers, $postfields)
+    {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $api_endpoint);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_POST, true);
+
+        // Handle multipart form-data or JSON
+        if (is_array($postfields)) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $postfields);
+        } else {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $postfields);
+        }
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        if (curl_errno($ch)) {
+            throw new Exception('cURL error: ' . curl_error($ch));
+        }
+
+        if ($http_code < 200 || $http_code >= 300) {
+            throw new Exception('HTTP error: ' . $http_code . ' - Response: ' . $response);
+        }
+
+        curl_close($ch);
+        return json_decode($response, true);
+    }
+
+
+    private function formatMessagesForClaude(array $messages): string
+    {
+        $formatted = [];
+        foreach ($messages as $message) {
+            $role = ucfirst($message['role']);
+            $content = trim($message['content']);
+            $formatted[] = "{$role}: {$content}";
+        }
+        return implode("\n\n", $formatted); // Separate messages with double newlines for clarity
+    }
+
+    private function normalizeResponse($response, $model)
+    {
+        $normalized = [];
+
+        if ($model === 'claude') {
+            // Extract content from Claude response
+            $normalized['content'] = $response['content'][0]['text'] ?? '';
+            $normalized['role'] = $response['role'] ?? 'assistant';
+            $normalized['model'] = $response['model'] ?? 'claude';
+            $normalized['usage'] = [
+                'prompt_tokens' => $response['usage']['input_tokens'] ?? 0,
+                'completion_tokens' => $response['usage']['output_tokens'] ?? 0,
+                'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
+            ];
+        } elseif ($model === 'gpt-4o') {
+            // Extract content from GPT-4o response
+            $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
+            $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';
+            $normalized['model'] = $response['model'] ?? 'gpt-4o';
+            $normalized['usage'] = [
+                'prompt_tokens' => $response['usage']['prompt_tokens'] ?? 0,
+                'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
+                'total_tokens' => $response['usage']['total_tokens'] ?? 0
+            ];
+        }else{
+            //if not specified pass thorugh as is
+            $normalized = $response;
+        }
+
+        return $normalized;
+    }
+
+
     private function logInteraction($project_id, $requestData, $responseData)
     {
-        // Save every data point in log table
         $payload = array_merge($requestData, $responseData);
         $payload['project_id'] = $project_id;
         $action = new SecureChatLog($this);
 
-        // Message capacity is currently ~16mb or 16 million characters
         $action->setValue('message', json_encode($payload));
         $action->setValue('record', 'SecureChatLog');
         $action->save();
     }
 
-    private function logErrorInteraction($project_id, $requestData, $error){
+    private function logErrorInteraction($project_id, $requestData, $error)
+    {
         $payload = array_merge($requestData, $error);
         $payload['project_id'] = $project_id;
         $action = new SecureChatLog($this);
 
-        // Message capacity is currently ~16mb or 16 million characters
         $action->setValue('message', json_encode($error));
         $action->setValue('record', 'SecureChatLogError');
         $action->save();
     }
 
-    /**
-     * Extract the main response text from the API response.
-     *
-     * @param array $response The API response.
-     * @return string The extracted response text.
-     */
+
     public function extractResponseText($response)
     {
-        return $response['choices'][0]['message']['content'] ?? json_encode($response);
+        // Extract `content` from normalized response
+        return $response['content'] ?? json_encode($response);
     }
 
-    /**
-     * Extract the usage tokens from the API response.
-     *
-     * @param array $response The API response.
-     * @return array The extracted usage data.
-     */
     public function extractUsageTokens($response)
     {
         return $response['usage'] ?? ['prompt_tokens' => 0, 'completion_tokens' => 0, 'total_tokens' => 0];
     }
 
-    /**
-     * Extract metadata from the API response.
-     *
-     * @param array $response The API response.
-     * @return array The extracted metadata.
-     */
     public function extractMetaData($response)
     {
         return [
@@ -313,169 +359,27 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         ];
     }
 
-    /**
-     * @return string
-     */
-    public function getApiAiUrl()
-    {
-        return $this->api_ai_url;
-    }
 
-    /**
-     * @param string $url
-     */
-    public function setApiAiUrl(string $url): void
-    {
-        $this->api_ai_url = $url;
-    }
-
-    /**
-     * @return string
-     */
-    public function getApiEmbeddingsUrl()
-    {
-        return $this->api_embeddings_url;
-    }
-
-    /**
-     * @param ?string $api_embeddings_url
-     */
-    public function setApiEmbeddingsUrl(?string $api_embeddings_url): void
-    {
-        $this->api_embeddings_url = $api_embeddings_url;
-    }
-
-    public function getApiWhisperUrl()
-    {
-        return $this->api_whisper_url;
-    }
-
-    /**
-     * @param ?string $api_whisper_url
-     */
-    public function setApiWhisperUrl(?string $api_whisper_url): void
-    {
-        $this->api_whisper_url = $api_whisper_url;
-    }
-
-    /**
-     * @return string
-     */
-    public function getApiKey()
-    {
-        return $this->api_key;
-    }
-
-    /**
-     * @param string $api_key
-     */
-    public function setApiKey(string $api_key): void
-    {
-        $this->api_key = $api_key;
-    }
-
-    /**
-     * @return string
-     */
-    public function getApiEmbeddingsKey()
-    {
-        return $this->api_embeddings_key;
-    }
-
-    /**
-     * @param string $api_key
-     */
-    public function setApiEmbeddingsKey(string $api_key): void
-    {
-        $this->api_embeddings_key = $api_key;
-    }
-
-    /**
-     * @return string
-     */
-    public function getApiWhisperKey()
-    {
-        return $this->api_whisper_key;
-    }
-
-    /**
-     * @param ?string $api_key
-     */
-    public function setApiWhisperKey(?string $api_key): void
-    {
-        $this->api_whisper_key = $api_key;
-    }
-
-
-    /**
-     * @return array
-     */
-    public function getDefaultParams()
-    {
-        return $this->defaultParams;
-    }
-
-    /**
-     * @param array $defaultParams
-     */
-    public function setDefaultParams(array $defaultParams): void
-    {
-        $this->defaultParams = $defaultParams;
-    }
-
-    /**
-     * @return Client
-     */
     public function getGuzzleClient()
     {
         if (!$this->guzzleClient) {
-            $this->setGuzzleClient(new Client([
+            $this->guzzleClient = new Client([
                 'timeout' => 30,
                 'connect_timeout' => 10,
                 'verify' => false
-            ]));
+            ]);
         }
         return $this->guzzleClient;
     }
 
-    /**
-     * @param Client $guzzleClient
-     */
-    public function setGuzzleClient(Client $guzzleClient): void
+    public function setGuzzleTimeout(float $timeout)
     {
-        $this->guzzleClient = $guzzleClient;
-    }
-
-    /**
-     * @param array $config
-     * @return void
-     */
-    public function setModelConfig(array $config): void
-    {
-        $this->modelConfig = $config;
-    }
-
-    /**
-     * @return array
-     */
-    public function getModelConfig(): array
-    {
-        return $this->modelConfig;
-    }
-
-    public function setGuzzleTimeout($float)
-    {
-        $this->guzzleTimeout = $float;
+        $this->guzzleTimeout = $timeout;
     }
 
     public function getGuzzleTimeout(): float
     {
         return $this->guzzleTimeout;
-    }
-
-    public function getSecureChatLogObject()
-    {
-        return new SecureChatLog($this);
     }
 }
 ?>
