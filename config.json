@@ -39,53 +39,55 @@
         ]
     },
     "no-auth-pages": [],
-    "project-settings": [
-        {
-            "key": "enable-project-debug-logging",
-            "name": "<b>Enable Debug Logging</b><br><i>(optional)</i> Requires installation and configuration of emLogger",
-            "required": false,
-            "type": "checkbox"
-        },
-        {
-            "key": "guzzle-timeout",
-            "name": "<b>Guzzle Timeout</b><br><i>(optional)</i> Float time in seconds describing the maximum timeout of the request. Default: 5, use 0 to wait indefinitely."
-        }
-    ],
     "system-settings": [
         {
-            "key": "secure-chat-api-url",
-            "name": "<b>Api Endpoint</b> Includes LLM Model",
-            "required": false,
-            "type": "text"
-        },
-        {
-            "key": "secure-chat-embeddings-api-url",
-            "name": "<b>Api Endpoint</b> for embeddings (vector)",
-            "required": false,
-            "type": "text"
-        },
-        {
-            "key": "secure-chat-api-token",
-            "name": "<b>Api Token</b> for LLM",
-            "required": false,
-            "type": "text"
-        },
-        {
-            "key": "secure-chat-embeddings-api-token",
-            "name": "<b>Api Token</b> for Embeddings",
-            "required": false,
-            "type": "text"
-        },
-        {
-            "key": "gpt-model",
-            "name": "<b>GPT Model</b> default : <i>gpt-4o</i>",
-            "required": false,
-            "type": "text",
-            "default": "gpt-4"
+            "key": "api-settings",
+            "name": "<b>AI Model API Settings</b>",
+            "required": true,
+            "type": "sub_settings",
+            "repeatable": true,
+            "sub_settings": [
+                {
+                    "key": "model-alias",
+                    "name": "<b>Model Alias</b> <i>(e.g., gpt-4o, ada-002)</i>",
+                    "type": "text",
+                    "required": true
+                },
+                {
+                    "key": "api-url",
+                    "name": "<b>API Endpoint</b>",
+                    "type": "text",
+                    "required": true
+                },
+                {
+                    "key": "api-token",
+                    "name": "<b>API Token</b>",
+                    "type": "text",
+                    "required": true
+                },
+                {
+                    "key": "api-key-var",
+                    "name": "<b>API Key Variable Name</b> <i>(e.g., subscription-key, api-key, Ocp-Apim-Subscription-Key)</i>",
+                    "type": "text",
+                    "required": true
+                },
+                {
+                    "key": "api-input-var",
+                    "name": "<b>Model input Variable Name</b> <i>(e.g., messages, input)</i>",
+                    "type": "text",
+                    "required": true
+                },
+                {
+                    "key": "default-model",
+                    "name": "<b>Default Model</b> <i>(Check if this is the default model)</i>",
+                    "type": "checkbox",
+                    "required": false
+                }
+            ]
         },
         {
             "key": "gpt-temperature",
-            "name": "<b>Temperature</b> default : <i>0.7</i> <br>(controls randomness) ",
+            "name": "<b>Temperature</b> default: <i>0.7</i> <br>(Controls randomness)",
             "required": false,
             "type": "number",
             "min": 0,
@@ -94,7 +96,7 @@
         },
         {
             "key": "gpt-top-p",
-            "name": "<b>Top P</b> default : <i>0.9</i> <br>(controls diversity via nucleus sampling)",
+            "name": "<b>Top P</b> default: <i>0.9</i> <br>(Controls diversity via nucleus sampling)",
             "required": false,
             "type": "number",
             "min": 0,
@@ -103,7 +105,7 @@
         },
         {
             "key": "gpt-frequency-penalty",
-            "name": "<b>Frequency Penalty</b> default : <i>0.5</i> <br>(reduces repetition)",
+            "name": "<b>Frequency Penalty</b> default: <i>0.5</i> <br>(Reduces repetition)",
             "required": false,
             "type": "number",
             "min": 0,
@@ -112,7 +114,7 @@
         },
         {
             "key": "gpt-presence-penalty",
-            "name": "<b>Presence Penalty</b> default : <i>0.0</i> <br>(increases topic variety)",
+            "name": "<b>Presence Penalty</b> default: <i>0.0</i> <br>(Increases topic variety)",
             "required": false,
             "type": "number",
             "min": 0,
@@ -121,22 +123,10 @@
         },
         {
             "key": "gpt-max-tokens",
-            "name": "<b>Max Tokens</b> default : <i>800</i> <br>(limits response length)",
+            "name": "<b>Max Tokens</b> default: <i>800</i> <br>(Limits response length)",
             "required": false,
             "type": "number",
             "default": 800
-        },
-        {
-            "key": "secure-chat-whisper-api-url",
-            "name": "<b>Api Endpoint</b> for Whisper (speech to text)",
-            "required": false,
-            "type": "text"
-        },
-        {
-            "key": "secure-chat-whisper-api-token",
-            "name": "<b>Api Token</b> for Whisper",
-            "required": false,
-            "type": "text"
         },
         {
             "key": "whisper-language",
