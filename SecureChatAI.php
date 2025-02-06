@@ -74,7 +74,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             try {
                 // Ensure the secure chat AI is initialized
                 $this->initSecureChatAI();
-                $this->emDebug("Initialized SecureChatAI with model", $model);
+//                $this->emDebug("Initialized SecureChatAI with model", $model);
 
                 // Check if model is supported
                 if (!isset($this->modelConfig[$model])) {
@@ -82,7 +82,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 }
 
                 $modelConfig = $this->modelConfig[$model];
-                $this->emDebug("Loaded model configuration", $modelConfig);
+//                $this->emDebug("Loaded model configuration", $modelConfig);
 
                 $api_endpoint = $modelConfig['api_url'];
                 $auth_key_name = $modelConfig['api_key_var'];
@@ -118,16 +118,16 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         throw new Exception("Unsupported model configuration for: $model");
                 }
 
-                $this->emDebug("Prepared API call", [
-                    'endpoint' => $api_endpoint,
-                    'headers' => $headers,
-                    'postfields' => $postfields ?? null
-                ]);
+//                $this->emDebug("Prepared API call", [
+//                    'endpoint' => $api_endpoint,
+//                    'headers' => $headers,
+//                    'postfields' => $postfields ?? null
+//                ]);
 
                 // Execute the API call
                 $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
                 $normalizedResponse = $this->normalizeResponse($responseData, $model);
-                $this->emDebug("Normalized API Response", $normalizedResponse);
+//                $this->emDebug("Normalized API Response", $normalizedResponse);
 
                 // Log interaction only if project_id is available
                 if ($project_id) {
@@ -199,13 +199,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     private function prepareWhisperRequest(&$params, &$api_endpoint, &$headers, $api_key)
     {
-        // Check if the file parameter exists and validate it as a string before creating a CURLFile object
-        if (!isset($params['file']) || !is_string($params['file']) || !file_exists($params['file'])) {
-            throw new Exception("Whisper: File not found or invalid at path: " . ($params['file'] ?? 'undefined'));
-        }
-
-        $filePath = $params['file']; // Preserve the string file path for logging
-
         // Set headers for multipart/form-data
         $headers = ['Content-Type: multipart/form-data', 'Accept: application/json'];
 
@@ -213,14 +206,45 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $auth_key_name = $this->modelConfig['whisper']['api_key_var'] ?? 'api-key';
         $api_endpoint .= (strpos($api_endpoint, '?') === false ? '?' : '&') . "$auth_key_name=$api_key";
 
-        // Replace the file parameter with a CURLFile object
-        $params = [
-            'file' => curl_file_create($filePath, 'audio/mpeg', basename($filePath)),
-            'language' => $params['language'] ?? 'en',
-            'temperature' => $params['temperature'] ?? '0.0',
-            'format' => $params['format'] ?? 'json'
-        ];
+        if (!empty($params['fileBase64']) && !empty($params['fileName'])) {
+            // Handle Base64-encoded input
+            $decodedFile = base64_decode($params['fileBase64']);
+            if ($decodedFile === false) {
+                throw new Exception("Whisper: Failed to decode Base64 file data.");
+            }
+
+            // Save the decoded file to a temporary path
+            $tempFilePath = sys_get_temp_dir() . '/' . uniqid('whisper_', true) . '_' . $params['fileName'];
+            if (file_put_contents($tempFilePath, $decodedFile) === false) {
+                throw new Exception("Whisper: Failed to save decoded file to temporary path.");
+            }
+
+            // Replace Base64 data with a CURLFile object
+            $params = [
+                'file' => curl_file_create($tempFilePath, mime_content_type($tempFilePath), basename($tempFilePath)),
+                'language' => $params['language'] ?? 'en',
+                'temperature' => $params['temperature'] ?? '0.0',
+                'format' => $params['format'] ?? 'json'
+            ];
+            // Cleanup: Ensure temp file removal later
+            register_shutdown_function(function () use ($tempFilePath) {
+                if (file_exists($tempFilePath)) {
+                    unlink($tempFilePath);
+                }
+            });
+        } elseif (!empty($params['file']) && file_exists($params['file'])) {
+            // Handle file path input
+            $params = [
+                'file' => curl_file_create($params['file'], mime_content_type($params['file']), basename($params['file'])),
+                'language' => $params['language'] ?? 'en',
+                'temperature' => $params['temperature'] ?? '0.0',
+                'format' => $params['format'] ?? 'json'
+            ];
+        } else {
+            throw new Exception("Whisper: File not found or invalid input. Provide either a file path or Base64 data.");
+        }
     }
+
 
     private function prepareClaudeRequest(&$params, &$api_endpoint, &$headers, $api_key, &$postfields)
     {
@@ -261,7 +285,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'som-redcap-whisper.openai.azure.com:443:10.153.192.4',
             'som-redcap.openai.azure.com:443:10.249.50.7'
         ]);
-        
+
         $response = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
