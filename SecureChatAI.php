@@ -114,20 +114,26 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         $postfields = json_encode(array_merge($this->defaultParams, $params));
                         break;
 
+                    case 'o1':
+                    case 'o3-mini':
+                        $this->prepareGPToRequest($params, $headers, $api_key, $model, $postfields);
+                        break;
+
                     default:
                         throw new Exception("Unsupported model configuration for: $model");
                 }
 
-//                $this->emDebug("Prepared API call", [
-//                    'endpoint' => $api_endpoint,
-//                    'headers' => $headers,
-//                    'postfields' => $postfields ?? null
-//                ]);
+            //    $this->emDebug("Prepared API call", [
+            //        'endpoint' => $api_endpoint,
+            //        'headers' => $headers,
+                   
+            //    ]);
 
                 // Execute the API call
                 $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
+                // $this->emDebug("response data", $responseData);
                 $normalizedResponse = $this->normalizeResponse($responseData, $model);
-//                $this->emDebug("Normalized API Response", $normalizedResponse);
+                // $this->emDebug("Normalized API Response", $normalizedResponse);
 
                 // Log interaction only if project_id is available
                 if ($project_id) {
@@ -245,6 +251,16 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
     }
 
+    private function prepareGPToRequest(&$params,  &$headers, $api_key, $model, &$postfields)
+    {
+        $auth_key_name = $this->modelConfig[$model]['api_key_var'] ?? 'Ocp-Apim-Subscription-Key';
+        $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
+
+        $postfields = json_encode([
+            "model" => $params['model'] ?? "o1",
+            "messages" => $params['messages'] ?? []
+        ]);
+    }
 
     private function prepareClaudeRequest(&$params, &$api_endpoint, &$headers, $api_key, &$postfields)
     {
@@ -337,8 +353,18 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
                 'total_tokens' => $response['usage']['total_tokens'] ?? 0
             ];
-        }else{
-            //if not specified pass thorugh as is
+        } elseif (in_array($model, ['o1', 'o3-mini'])) {
+            // Extract content from o1 and o3-mini responses
+            $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
+            $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';
+            $normalized['model'] = $response['model'] ?? $model;
+            $normalized['usage'] = [
+                'prompt_tokens' => $response['usage']['prompt_tokens'] ?? 0,
+                'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
+                'total_tokens' => $response['usage']['total_tokens'] ?? 0
+            ];
+        } else {
+            // If the model isn't specified, pass through as-is
             $normalized = $response;
         }
 
