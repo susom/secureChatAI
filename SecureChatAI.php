@@ -128,7 +128,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         break;
 
                     // WILDLY DIFFERENT PATTERN FOR GEMINI
-                    case "gemini":
+                    case "gemini15pro":
+                        $this->prepareGeminiRequest($params, $headers, $api_key, $model, $postfields);
                         break;
 
                     default:
@@ -139,7 +140,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
                 // $this->emDebug("response data", $responseData);
                 $normalizedResponse = $this->normalizeResponse($responseData, $model);
-                // $this->emDebug("Normalized API Response", $normalizedResponse);
+                $this->emDebug("Normalized API Response", $normalizedResponse);
 
                 // Log interaction only if project_id is available
                 if ($project_id) {
@@ -284,6 +285,76 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         ]);
     }
 
+    private function prepareGeminiRequest(&$params, &$headers, $api_key, $model, &$postfields)
+    {
+        $auth_key_name = $this->modelConfig[$model]['api_key_var'] ;
+        $headers = [
+            'Content-Type: application/json',
+            "$auth_key_name: $api_key"
+        ];
+
+        $messages = $params['messages'] ?? [];
+        $geminiMessages = [];
+        $systemContext = "";
+
+        // Process messages to convert "system" role
+        foreach ($messages as $msg) {
+            if ($msg["role"] === "system") {
+                // Collect system messages as context
+                $systemContext .= trim($msg["content"]) . "\n\n";
+            } else {
+                // Convert normal messages
+                $geminiMessages[] = [
+                    "role" => $msg["role"],
+                    "parts" => [["text" => trim($msg["content"])]]
+                ];
+            }
+        }
+
+        // If system context exists, inject it into the first user message
+        if (!empty($systemContext)) {
+            if (!empty($geminiMessages) && $geminiMessages[0]["role"] === "user") {
+                // Prepend system context to first user message
+                $geminiMessages[0]["parts"][0]["text"] = $systemContext . $geminiMessages[0]["parts"][0]["text"];
+            } else {
+                // Otherwise, create a new user message for system context
+                array_unshift($geminiMessages, [
+                    "role" => "user",
+                    "parts" => [["text" => $systemContext]]
+                ]);
+            }
+        }
+
+        $this->emDebug("what the heck geminiMessages" , $geminiMessages);
+        $this->emDebug("systemContext", $systemContext);
+
+        // Define generation config
+        $generationConfig = [
+            "temperature" => $this->defaultParams['temperature'],
+            "topP" => $this->defaultParams['top_p'],
+            "max_output_tokens" => $this->defaultParams['max_tokens'],
+            "stop_sequences" => $this->defaultParams['stop'] ?? null, // Stop sequences if provided
+            "frequency_penalty" => $this->defaultParams['frequency_penalty'],
+            "presence_penalty" => $this->defaultParams['presence_penalty'],
+        ];
+
+        // Optional safety settings (can be adjusted)
+        $safetySettings = [
+            [
+                "category" => "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold" => "BLOCK_LOW_AND_ABOVE"
+            ]
+        ];
+
+        $postfields = json_encode([
+            "contents" => $geminiMessages,
+            "generation_config" => $generationConfig,
+            "safety_settings" => $safetySettings
+        ]);
+    }
+
+
+
     private function prepareAIRequest(&$params,  &$headers, $api_key, $model, $model_id, &$postfields)
     {
         $auth_key_name = $this->modelConfig[$model]['api_key_var'];
@@ -321,16 +392,32 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
                 'total_tokens' => $response['usage']['total_tokens'] ?? 0
             ];
-        } elseif ($model === 'gcpgemini') {
-            // Extract content from GEMINI response, wildy different
-            // $normalized['content'] = $response['content'][0]['text'] ?? '';
-            // $normalized['role'] = $response['role'] ?? 'assistant';
-            // $normalized['model'] = $response['model'] ?? 'claude';
-            // $normalized['usage'] = [
-            //     'prompt_tokens' => $response['usage']['input_tokens'] ?? 0,
-            //     'completion_tokens' => $response['usage']['output_tokens'] ?? 0,
-            //     'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
-            // ];
+        } elseif ($model === 'gemini15pro') {
+            // Collect all text parts across multiple candidates
+            $contentParts = [];
+            foreach ($response as $resp) {
+                if (!empty($resp['candidates'][0]['content']['parts'])) {
+                    foreach ($resp['candidates'][0]['content']['parts'] as $part) {
+                        if (!empty($part['text'])) {
+                            $contentParts[] = $part['text'];
+                        }
+                    }
+                }
+            }
+        
+            // Join all content pieces into one response
+            $normalized['content'] = implode(" ", $contentParts);
+        
+            $normalized['role'] = "assistant";
+            $normalized['model'] = $response[0]['modelVersion'] ?? $model;
+            
+            // Extract token usage from the last response chunk (assuming it's in the last index)
+            $usage = end($response)['usageMetadata'] ?? [];
+            $normalized['usage'] = [
+                'prompt_tokens' => $usage['promptTokenCount'] ?? 0,
+                'completion_tokens' => $usage['candidatesTokenCount'] ?? 0,
+                'total_tokens' => $usage['totalTokenCount'] ?? 0
+            ];
         } else {
             // If the model isn't specified, pass through as-is
             $normalized = $response;
