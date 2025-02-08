@@ -111,7 +111,7 @@ class ASEMLO
                 $this->data[$name] = $val;
                 if ($mark_change_as_dirty) $this->dirty_keys[] = $name;
             } else {
-                $this->module->emDebug("No change to $name");
+                // $this->module->emDebug("No change to $name");
             }
         } elseif(in_array($name, self::PRIMARY_FIXED_COLUMNS)) {
             // Is a primary fixed column - only set its value from null on load
@@ -280,7 +280,7 @@ class ASEMLO
 
             // $this->module->emDebug("Updatable Data", $updatable_data, $this->data);
             $message = $this->data['message'] ?? "-";
-            $this->module->emDebug("About to save $message: " , $updatable_data);
+            // $this->module->emDebug("About to save $message: " , $updatable_data);
             if ($log_id = $this->module->log($message, $updatable_data)) {
                 $this->setId($log_id);
                 $this->module->emDebug("Created log $log_id");

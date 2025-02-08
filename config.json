@@ -54,6 +54,12 @@
                     "required": true
                 },
                 {
+                    "key": "model-id",
+                    "name": "<b>Model ID</b> <i>(e.g., Llama-3.3-70B-Instruct, etc)</i>",
+                    "type": "text",
+                    "required": true
+                },
+                {
                     "key": "api-url",
                     "name": "<b>API Endpoint</b>",
                     "type": "text",
