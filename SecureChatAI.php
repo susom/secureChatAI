@@ -40,11 +40,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $apiSettings = $this->framework->getSubSettings('api-settings');
         foreach ($apiSettings as $setting) {
             $modelAlias = $setting['model-alias'];
+            $modelID = $setting['model-id'];
             $this->modelConfig[$modelAlias] = [
                 'api_url' => $setting['api-url'],
                 'api_token' => $setting['api-token'],
                 'api_key_var' => $setting['api-key-var'],
-                'required' => $setting['api-input-var']
+                'required' => $setting['api-input-var'],
+                'model_id' => $modelID
             ];
 
             if (isset($setting['default-model']) && $setting['default-model']) {
@@ -74,7 +76,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             try {
                 // Ensure the secure chat AI is initialized
                 $this->initSecureChatAI();
-//                $this->emDebug("Initialized SecureChatAI with model", $model);
+                // $this->emDebug("Initialized SecureChatAI with model", $model);
 
                 // Check if model is supported
                 if (!isset($this->modelConfig[$model])) {
@@ -82,11 +84,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 }
 
                 $modelConfig = $this->modelConfig[$model];
-//                $this->emDebug("Loaded model configuration", $modelConfig);
+                // $this->emDebug("Loaded model configuration", $modelConfig);
 
                 $api_endpoint = $modelConfig['api_url'];
                 $auth_key_name = $modelConfig['api_key_var'];
                 $api_key = $modelConfig['api_token'];
+                $model_id = $modelConfig['model_id'];
                 $headers = [];
 
                 // Ensure required parameters are provided
@@ -98,36 +101,39 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
                 // Prepare request headers, URL, and payload based on model type
                 switch ($model) {
-                    case 'whisper':
-                        $this->prepareWhisperRequest($params, $api_endpoint, $headers, $api_key);
-                        $postfields = $params;
-                        break;
-
-                    case 'claude':
-                        $this->prepareClaudeRequest($params, $api_endpoint, $headers, $api_key, $postfields);
-                        break;
-
+                    // OLD WAY WHERE key APPENDED TO QueryString
                     case 'gpt-4o':
                     case 'ada-002':
                         $headers = ['Content-Type: application/json', 'Accept: application/json'];
                         $api_endpoint .= (strpos($api_endpoint, '?') === false ? '?' : '&') . "$auth_key_name=$api_key";
                         $postfields = json_encode(array_merge($this->defaultParams, $params));
                         break;
+                        
+                    // SPECIAL CASE FOR WHISPER    
+                    case 'whisper':
+                        $this->prepareWhisperRequest($params, $api_endpoint, $headers, $api_key);
+                        $postfields = $params;
+                        break;
 
+                    // "FINAL" PATTERN
                     case 'o1':
                     case 'o3-mini':
-                        $this->prepareGPToRequest($params, $headers, $api_key, $model, $postfields);
+                    case 'llama3370b':
+                        $this->prepareAIRequest($params, $headers, $api_key, $model, $model_id, $postfields);
+                        break;
+
+                    // same "FINAL" PATTERN BUT SLIGHTY DIFFERENT FOR CLAUDE    
+                    case 'claude':
+                        $this->prepareClaudeRequest($params, $headers, $api_key, $model_id, $postfields);
+                        break;
+
+                    // WILDLY DIFFERENT PATTERN FOR GEMINI
+                    case "gemini":
                         break;
 
                     default:
                         throw new Exception("Unsupported model configuration for: $model");
                 }
-
-            //    $this->emDebug("Prepared API call", [
-            //        'endpoint' => $api_endpoint,
-            //        'headers' => $headers,
-                   
-            //    ]);
 
                 // Execute the API call
                 $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
@@ -251,20 +257,20 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
     }
 
-    private function prepareGPToRequest(&$params,  &$headers, $api_key, $model, &$postfields)
+    private function formatMessagesForClaude(array $messages): string
     {
-        $auth_key_name = $this->modelConfig[$model]['api_key_var'] ?? 'Ocp-Apim-Subscription-Key';
-        $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
-
-        $postfields = json_encode([
-            "model" => $params['model'] ?? "o1",
-            "messages" => $params['messages'] ?? []
-        ]);
+        $formatted = [];
+        foreach ($messages as $message) {
+            $role = ucfirst($message['role']);
+            $content = trim($message['content']);
+            $formatted[] = "{$role}: {$content}";
+        }
+        return implode("\n\n", $formatted); // Separate messages with double newlines for clarity
     }
 
-    private function prepareClaudeRequest(&$params, &$api_endpoint, &$headers, $api_key, &$postfields)
+    private function prepareClaudeRequest(&$params, &$headers, $api_key, $model_id, &$postfields)
     {
-        $auth_key_name = $this->modelConfig['claude']['api_key_var'] ?? 'Ocp-Apim-Subscription-Key';
+        $auth_key_name = $this->modelConfig['claude']['api_key_var'];
         $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
         $prompt_text = isset($params['messages']) ? $this->formatMessagesForClaude($params['messages']) : ($params['prompt_text'] ?? '');
 
@@ -273,9 +279,64 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
 
         $postfields = json_encode([
-            "model_id" => "anthropic.claude-3-5-sonnet-20241022-v2:0",
+            "model_id" => $model_id,
             "prompt_text" => $prompt_text
         ]);
+    }
+
+    private function prepareAIRequest(&$params,  &$headers, $api_key, $model, $model_id, &$postfields)
+    {
+        $auth_key_name = $this->modelConfig[$model]['api_key_var'];
+        $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
+
+        $postfields = json_encode([
+            "model" => $model_id,
+            "messages" => $params['messages'] ?? []
+        ]);
+    }
+
+    private function normalizeResponse($response, $model)
+    {
+        $this->emDebug("API responseData for normalizeResponse", $model, $response);
+
+        $normalized = [];
+
+        if ($model === 'claude') {
+            // Extract content from Claude response
+            $normalized['content'] = $response['content'][0]['text'] ?? '';
+            $normalized['role'] = $response['role'] ?? 'assistant';
+            $normalized['model'] = $response['model'] ?? 'claude';
+            $normalized['usage'] = [
+                'prompt_tokens' => $response['usage']['input_tokens'] ?? 0,
+                'completion_tokens' => $response['usage']['output_tokens'] ?? 0,
+                'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
+            ];
+        } elseif (in_array($model, ['o1', 'o3-mini', "gpt-4o", "llama3370b"])) {
+            // Extract content from o1 and o3-mini responses
+            $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
+            $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';
+            $normalized['model'] = $response['model'] ?? $model;
+            $normalized['usage'] = [
+                'prompt_tokens' => $response['usage']['prompt_tokens'] ?? 0,
+                'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
+                'total_tokens' => $response['usage']['total_tokens'] ?? 0
+            ];
+        } elseif ($model === 'gcpgemini') {
+            // Extract content from GEMINI response, wildy different
+            // $normalized['content'] = $response['content'][0]['text'] ?? '';
+            // $normalized['role'] = $response['role'] ?? 'assistant';
+            // $normalized['model'] = $response['model'] ?? 'claude';
+            // $normalized['usage'] = [
+            //     'prompt_tokens' => $response['usage']['input_tokens'] ?? 0,
+            //     'completion_tokens' => $response['usage']['output_tokens'] ?? 0,
+            //     'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
+            // ];
+        } else {
+            // If the model isn't specified, pass through as-is
+            $normalized = $response;
+        }
+
+        return $normalized;
     }
 
     private function executeApiCall($api_endpoint, $headers, $postfields)
@@ -315,60 +376,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         curl_close($ch);
         return json_decode($response, true);
-    }
-
-
-    private function formatMessagesForClaude(array $messages): string
-    {
-        $formatted = [];
-        foreach ($messages as $message) {
-            $role = ucfirst($message['role']);
-            $content = trim($message['content']);
-            $formatted[] = "{$role}: {$content}";
-        }
-        return implode("\n\n", $formatted); // Separate messages with double newlines for clarity
-    }
-
-    private function normalizeResponse($response, $model)
-    {
-        $normalized = [];
-
-        if ($model === 'claude') {
-            // Extract content from Claude response
-            $normalized['content'] = $response['content'][0]['text'] ?? '';
-            $normalized['role'] = $response['role'] ?? 'assistant';
-            $normalized['model'] = $response['model'] ?? 'claude';
-            $normalized['usage'] = [
-                'prompt_tokens' => $response['usage']['input_tokens'] ?? 0,
-                'completion_tokens' => $response['usage']['output_tokens'] ?? 0,
-                'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
-            ];
-        } elseif ($model === 'gpt-4o') {
-            // Extract content from GPT-4o response
-            $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
-            $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';
-            $normalized['model'] = $response['model'] ?? 'gpt-4o';
-            $normalized['usage'] = [
-                'prompt_tokens' => $response['usage']['prompt_tokens'] ?? 0,
-                'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
-                'total_tokens' => $response['usage']['total_tokens'] ?? 0
-            ];
-        } elseif (in_array($model, ['o1', 'o3-mini'])) {
-            // Extract content from o1 and o3-mini responses
-            $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
-            $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';
-            $normalized['model'] = $response['model'] ?? $model;
-            $normalized['usage'] = [
-                'prompt_tokens' => $response['usage']['prompt_tokens'] ?? 0,
-                'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
-                'total_tokens' => $response['usage']['total_tokens'] ?? 0
-            ];
-        } else {
-            // If the model isn't specified, pass through as-is
-            $normalized = $response;
-        }
-
-        return $normalized;
     }
 
 
