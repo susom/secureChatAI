@@ -32,6 +32,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'frequency_penalty' => (float)$this->getSystemSetting('gpt-frequency-penalty') ?: 0.5,
             'presence_penalty' => (float)$this->getSystemSetting('gpt-presence-penalty') ?: 0,
             'max_tokens' => (int)$this->getSystemSetting('gpt-max-tokens') ?: 800,
+            'reasoning_effort' => $this->getSystemSetting('reasoning-effort') ,
             'stop' => null,
             'model' => 'gpt-4o'
         ];
@@ -106,7 +107,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     case 'ada-002':
                         $headers = ['Content-Type: application/json', 'Accept: application/json'];
                         $api_endpoint .= (strpos($api_endpoint, '?') === false ? '?' : '&') . "$auth_key_name=$api_key";
-                        $postfields = json_encode(array_merge($this->defaultParams, $params));
+                        $merged_params = array_merge($this->defaultParams, $params);
+                        unset($merged_params["reasoning_effort"]);
+                        $postfields = json_encode($merged_params);
                         break;
                         
                     // SPECIAL CASE FOR WHISPER    
@@ -138,7 +141,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
                 // Execute the API call
                 $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
-                // $this->emDebug("response data", $responseData);
+                $this->emDebug("response data", $model, json_decode($postfields,1));
                 $normalizedResponse = $this->normalizeResponse($responseData, $model);
                 $this->emDebug("Normalized API Response", $normalizedResponse);
 
@@ -273,15 +276,27 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     {
         $auth_key_name = $this->modelConfig['claude']['api_key_var'];
         $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
-        $prompt_text = isset($params['messages']) ? $this->formatMessagesForClaude($params['messages']) : ($params['prompt_text'] ?? '');
+
+        // Format messages using existing helper
+        $prompt_text = isset($params['messages']) 
+            ? $this->formatMessagesForClaude($params['messages']) 
+            : ($params['prompt_text'] ?? '');
 
         if (empty($prompt_text)) {
             throw new Exception('Claude API requires prompt_text in the request body.');
         }
 
+        // only Claude-supported keys
+        $parameters = [
+            "temperature" => $this->defaultParams['temperature'],
+            "top_p" => $this->defaultParams['top_p'],
+            "max_tokens" => $this->defaultParams['max_tokens']
+        ];
+
         $postfields = json_encode([
-            "model_id" => $model_id,
-            "prompt_text" => $prompt_text
+            "model_id" => $model_id,  // ✅ Keeps Claude’s expected `model_id`
+            "prompt_text" => $prompt_text, // ✅ Keeps Claude’s expected `prompt_text`
+            "parameters" => $parameters // ✅ Adds tuning options without breaking Claude
         ]);
     }
 
@@ -325,9 +340,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             }
         }
 
-        $this->emDebug("what the heck geminiMessages" , $geminiMessages);
-        $this->emDebug("systemContext", $systemContext);
-
         // Define generation config
         $generationConfig = [
             "temperature" => $this->defaultParams['temperature'],
@@ -353,22 +365,30 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         ]);
     }
 
-
-
     private function prepareAIRequest(&$params,  &$headers, $api_key, $model, $model_id, &$postfields)
     {
         $auth_key_name = $this->modelConfig[$model]['api_key_var'];
         $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
 
-        $postfields = json_encode([
-            "model" => $model_id,
-            "messages" => $params['messages'] ?? []
-        ]);
+        $postfields = json_encode(
+            in_array($model, ['o1', 'o3-mini'])
+                ? [ // Specific params for `o1` and `o3-mini`
+                    "model" => $model_id,
+                    "messages" => $params['messages'] ?? [],
+                    "max_completion_tokens" => $this->defaultParams['max_tokens'], 
+                    "reasoning_effort" => $params['reasoning_effort'] ?? $this->defaultParams['reasoning_effort'] 
+                ]
+                : array_merge( // Standard merging for other models (llama only)
+                    $this->defaultParams,
+                    $params,
+                    ["model" => $model_id, "messages" => $params['messages'] ?? []]
+                )
+        );
     }
 
     private function normalizeResponse($response, $model)
     {
-        $this->emDebug("API responseData for normalizeResponse", $model, $response);
+        // $this->emDebug("API responseData for normalizeResponse", $model, $response);
 
         $normalized = [];
 
