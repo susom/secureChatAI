@@ -141,9 +141,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
                 // Execute the API call
                 $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
-                $this->emDebug("response data", $model, json_decode($postfields,1));
                 $normalizedResponse = $this->normalizeResponse($responseData, $model);
-                $this->emDebug("Normalized API Response", $normalizedResponse);
 
                 // Log interaction only if project_id is available
                 if ($project_id) {
@@ -242,6 +240,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'temperature' => $params['temperature'] ?? '0.0',
                 'format' => $params['format'] ?? 'json'
             ];
+
             // Cleanup: Ensure temp file removal later
             register_shutdown_function(function () use ($tempFilePath) {
                 if (file_exists($tempFilePath)) {
@@ -482,7 +481,16 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
 
         curl_close($ch);
-        return json_decode($response, true);
+
+        if (is_array($response)) {
+            return $response;
+        }
+
+        $decodedResponse = json_decode($response, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception("JSON decode error: " . json_last_error_msg());
+        }
+        return $decodedResponse;
     }
 
 
