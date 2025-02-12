@@ -5,7 +5,7 @@ namespace Stanford\SecureChatAI;
 require_once "emLoggerTrait.php";
 require_once "classes/SecureChatLog.php";
 
-use Exception;
+use Google\Exception;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 
@@ -111,8 +111,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         unset($merged_params["reasoning_effort"]);
                         $postfields = json_encode($merged_params);
                         break;
-                        
-                    // SPECIAL CASE FOR WHISPER    
+
+                    // SPECIAL CASE FOR WHISPER
                     case 'whisper':
                         $this->prepareWhisperRequest($params, $api_endpoint, $headers, $api_key);
                         $postfields = $params;
@@ -125,7 +125,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         $this->prepareAIRequest($params, $headers, $api_key, $model, $model_id, $postfields);
                         break;
 
-                    // same "FINAL" PATTERN BUT SLIGHTY DIFFERENT FOR CLAUDE    
+                    // same "FINAL" PATTERN BUT SLIGHTY DIFFERENT FOR CLAUDE
                     case 'claude':
                         $this->prepareClaudeRequest($params, $headers, $api_key, $model_id, $postfields);
                         break;
@@ -277,8 +277,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
 
         // Format messages using existing helper
-        $prompt_text = isset($params['messages']) 
-            ? $this->formatMessagesForClaude($params['messages']) 
+        $prompt_text = isset($params['messages'])
+            ? $this->formatMessagesForClaude($params['messages'])
             : ($params['prompt_text'] ?? '');
 
         if (empty($prompt_text)) {
@@ -374,8 +374,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 ? [ // Specific params for `o1` and `o3-mini`
                     "model" => $model_id,
                     "messages" => $params['messages'] ?? [],
-                    "max_completion_tokens" => $this->defaultParams['max_tokens'], 
-                    "reasoning_effort" => $params['reasoning_effort'] ?? $this->defaultParams['reasoning_effort'] 
+                    "max_completion_tokens" => $this->defaultParams['max_tokens'],
+                    "reasoning_effort" => $params['reasoning_effort'] ?? $this->defaultParams['reasoning_effort']
                 ]
                 : array_merge( // Standard merging for other models (llama only)
                     $this->defaultParams,
@@ -423,13 +423,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     }
                 }
             }
-        
+
             // Join all content pieces into one response
             $normalized['content'] = implode(" ", $contentParts);
-        
+
             $normalized['role'] = "assistant";
             $normalized['model'] = $response[0]['modelVersion'] ?? $model;
-            
+
             // Extract token usage from the last response chunk (assuming it's in the last index)
             $usage = end($response)['usageMetadata'] ?? [];
             $normalized['usage'] = [
