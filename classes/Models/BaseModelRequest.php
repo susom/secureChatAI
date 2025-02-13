@@ -1,6 +1,6 @@
 <?php
 
-use Stanford\SecureChatAI\ModelInterface;
+namespace Stanford\SecureChatAI;
 
 
 /**
@@ -14,9 +14,9 @@ abstract class BaseModelRequest implements ModelInterface {
     protected array $headers = ['Content-Type: application/json', 'Accept: application/json'];
     protected array $defaultParams = [];
     protected string $auth_key_name;
-    protected array $module;
+    protected $module;
 
-    public function __construct(array $module, array $modelConfig, array $defaultParams) {
+    public function __construct($module, array $modelConfig, array $defaultParams) {
         $this->module = $module;
         $this->apiEndpoint = $modelConfig['api_url'];
         $this->apiKey = $modelConfig['api_token'];
@@ -48,17 +48,17 @@ abstract class BaseModelRequest implements ModelInterface {
         return [];
     }
 
-    public function sendRequest(string $apiEndpoint, array $params): array {
-        // Common API execution logic (e.g., using cURL)
-        $apiEndpoint .= (!str_contains($apiEndpoint, '?') ? '?' : '&') . "$this->auth_key_name=$this->apiKey";
-        $mergedParams = array_merge($this->defaultParams, $params);
-        unset($mergedParams["reasoning_effort"]);
-        $data = json_encode($mergedParams) ?? [];
-
-        $responseData = $this->module->executeApiCall($apiEndpoint, $this->headers, $data);
-
-        return $responseData; // Replace with actual API call logic
-    }
+//    public function sendRequest(string $apiEndpoint, array $params): array {
+//        // Common API execution logic (e.g., using cURL)
+//        $apiEndpoint .= (!str_contains($apiEndpoint, '?') ? '?' : '&') . "$this->auth_key_name=$this->apiKey";
+//        $mergedParams = array_merge($this->defaultParams, $params);
+//        unset($mergedParams["reasoning_effort"]);
+//        $data = json_encode($mergedParams) ?? [];
+//
+//        $responseData = $this->module->executeApiCall($apiEndpoint, $this->headers, $data);
+//
+//        return $responseData; // Replace with actual API call logic
+//    }
 
     public static function normalizeResponse(array $response): array {
         return $response; // Override in subclasses as needed
