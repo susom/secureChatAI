@@ -4,10 +4,12 @@ namespace Stanford\SecureChatAI;
 
 require_once "emLoggerTrait.php";
 require_once "classes/SecureChatLog.php";
+require_once "classes/Models/ModelInterface.php"; // ✅ Ensure interface is loaded first
+require_once "classes/Models/BaseModelRequest.php";
+require_once "classes/Models/GPTModelRequest.php";
 
 use Google\Exception;
 use GuzzleHttp\Client;
-use GuzzleHttp\Exception\GuzzleException;
 
 class SecureChatAI extends \ExternalModules\AbstractExternalModule
 {
@@ -105,23 +107,24 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     // OLD WAY WHERE key APPENDED TO QueryString
                     case 'gpt-4o':
                     case 'ada-002':
-                        $headers = ['Content-Type: application/json', 'Accept: application/json'];
-                        $api_endpoint .= (strpos($api_endpoint, '?') === false ? '?' : '&') . "$auth_key_name=$api_key";
-                        $merged_params = array_merge($this->defaultParams, $params);
-                        unset($merged_params["reasoning_effort"]);
-                        $postfields = json_encode($merged_params);
+                        $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams);
+                        $responseData = $gpt->sendRequest($api_endpoint, $params);
                         break;
 
                     // SPECIAL CASE FOR WHISPER
                     case 'whisper':
-                        $this->prepareWhisperRequest($params, $api_endpoint, $headers, $api_key);
-                        $postfields = $params;
+                        $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams);
+                        $whisper->setHeaders(['Content-Type: multipart/form-data', 'Accept: application/json']);
+
+                        //Whisper model structure operates independently, set Auth key manually
+                        $whisper->setAuthKeyName($modelConfig['whisper']['api_key_var'] ?? 'api-key');
+                        $responseData = $whisper->sendRequest($api_endpoint, $params);
                         break;
 
                     // "FINAL" PATTERN
                     case 'o1':
                     case 'o3-mini':
-                    case 'llama3370b':
+                    case 'llama3370b': //Meta
                         $this->prepareAIRequest($params, $headers, $api_key, $model, $model_id, $postfields);
                         break;
 
@@ -140,7 +143,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 }
 
                 // Execute the API call
-                $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
+//                $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
                 $normalizedResponse = $this->normalizeResponse($responseData, $model);
 
                 // Log interaction only if project_id is available
@@ -149,7 +152,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 }
 
                 return $normalizedResponse;
-            } catch (Exception $e) {
+            } catch (\Exception $e) {
                 $attempt++;
                 $this->emDebug("Attempt $attempt: Error", $e->getMessage());
 
@@ -172,93 +175,93 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
     }
 
-    private function addWhisperParameters(&$multipartData, $params): void
-    {
-        $fields = [
-            'initial_prompt',
-            'prompt'
-        ];
+//    private function addWhisperParameters(&$multipartData, $params): void
+//    {
+//        $fields = [
+//            'initial_prompt',
+//            'prompt'
+//        ];
+//
+//        foreach ($fields as $field) {
+//            if (!empty($params[$field])) {
+//                $multipartData[] = [
+//                    'name' => $field,
+//                    'contents' => $params[$field]
+//                ];
+//            }
+//        }
+//
+//        $settings = [
+//            'whisper-language' => 'language',
+//            'whisper-temperature' => 'temperature',
+//            'whisper-top-p' => 'top_p',
+//            'whisper-n' => 'n',
+//            'whisper-logprobs' => 'logprobs',
+//            'whisper-max-alternate-transcriptions' => 'max_alternate_transcriptions',
+//            'whisper-compression-rate' => 'compression_rate',
+//            'whisper-sample-rate' => 'sample_rate',
+//            'whisper-condition-on-previous-text' => 'condition_on_previous_text'
+//        ];
+//
+//        foreach ($settings as $settingKey => $fieldName) {
+//            $value = $this->getSystemSetting($settingKey);
+//            if ($value !== null) {
+//                $multipartData[] = [
+//                    'name' => $fieldName,
+//                    'contents' => is_bool($value) ? ($value ? 'true' : 'false') : (string) $value
+//                ];
+//            }
+//        }
+//    }
 
-        foreach ($fields as $field) {
-            if (!empty($params[$field])) {
-                $multipartData[] = [
-                    'name' => $field,
-                    'contents' => $params[$field]
-                ];
-            }
-        }
-
-        $settings = [
-            'whisper-language' => 'language',
-            'whisper-temperature' => 'temperature',
-            'whisper-top-p' => 'top_p',
-            'whisper-n' => 'n',
-            'whisper-logprobs' => 'logprobs',
-            'whisper-max-alternate-transcriptions' => 'max_alternate_transcriptions',
-            'whisper-compression-rate' => 'compression_rate',
-            'whisper-sample-rate' => 'sample_rate',
-            'whisper-condition-on-previous-text' => 'condition_on_previous_text'
-        ];
-
-        foreach ($settings as $settingKey => $fieldName) {
-            $value = $this->getSystemSetting($settingKey);
-            if ($value !== null) {
-                $multipartData[] = [
-                    'name' => $fieldName,
-                    'contents' => is_bool($value) ? ($value ? 'true' : 'false') : (string) $value
-                ];
-            }
-        }
-    }
-
-    private function prepareWhisperRequest(&$params, &$api_endpoint, &$headers, $api_key)
-    {
-        // Set headers for multipart/form-data
-        $headers = ['Content-Type: multipart/form-data', 'Accept: application/json'];
-
-        // Append the API key to the endpoint
-        $auth_key_name = $this->modelConfig['whisper']['api_key_var'] ?? 'api-key';
-        $api_endpoint .= (strpos($api_endpoint, '?') === false ? '?' : '&') . "$auth_key_name=$api_key";
-
-        if (!empty($params['fileBase64']) && !empty($params['fileName'])) {
-            // Handle Base64-encoded input
-            $decodedFile = base64_decode($params['fileBase64']);
-            if ($decodedFile === false) {
-                throw new Exception("Whisper: Failed to decode Base64 file data.");
-            }
-
-            // Save the decoded file to a temporary path
-            $tempFilePath = sys_get_temp_dir() . '/' . uniqid('whisper_', true) . '_' . $params['fileName'];
-            if (file_put_contents($tempFilePath, $decodedFile) === false) {
-                throw new Exception("Whisper: Failed to save decoded file to temporary path.");
-            }
-
-            // Replace Base64 data with a CURLFile object
-            $params = [
-                'file' => curl_file_create($tempFilePath, mime_content_type($tempFilePath), basename($tempFilePath)),
-                'language' => $params['language'] ?? 'en',
-                'temperature' => $params['temperature'] ?? '0.0',
-                'format' => $params['format'] ?? 'json'
-            ];
-
-            // Cleanup: Ensure temp file removal later
-            register_shutdown_function(function () use ($tempFilePath) {
-                if (file_exists($tempFilePath)) {
-                    unlink($tempFilePath);
-                }
-            });
-        } elseif (!empty($params['file']) && file_exists($params['file'])) {
-            // Handle file path input
-            $params = [
-                'file' => curl_file_create($params['file'], mime_content_type($params['file']), basename($params['file'])),
-                'language' => $params['language'] ?? 'en',
-                'temperature' => $params['temperature'] ?? '0.0',
-                'format' => $params['format'] ?? 'json'
-            ];
-        } else {
-            throw new Exception("Whisper: File not found or invalid input. Provide either a file path or Base64 data.");
-        }
-    }
+//    private function prepareWhisperRequest(&$params, &$api_endpoint, &$headers, $api_key)
+//    {
+//        // Set headers for multipart/form-data
+//        $headers = ['Content-Type: multipart/form-data', 'Accept: application/json'];
+//
+//        // Append the API key to the endpoint
+//        $auth_key_name = $this->modelConfig['whisper']['api_key_var'] ?? 'api-key';
+//        $api_endpoint .= (strpos($api_endpoint, '?') === false ? '?' : '&') . "$auth_key_name=$api_key";
+//
+//        if (!empty($params['fileBase64']) && !empty($params['fileName'])) {
+//            // Handle Base64-encoded input
+//            $decodedFile = base64_decode($params['fileBase64']);
+//            if ($decodedFile === false) {
+//                throw new Exception("Whisper: Failed to decode Base64 file data.");
+//            }
+//
+//            // Save the decoded file to a temporary path
+//            $tempFilePath = sys_get_temp_dir() . '/' . uniqid('whisper_', true) . '_' . $params['fileName'];
+//            if (file_put_contents($tempFilePath, $decodedFile) === false) {
+//                throw new Exception("Whisper: Failed to save decoded file to temporary path.");
+//            }
+//
+//            // Replace Base64 data with a CURLFile object
+//            $params = [
+//                'file' => curl_file_create($tempFilePath, mime_content_type($tempFilePath), basename($tempFilePath)),
+//                'language' => $params['language'] ?? 'en',
+//                'temperature' => $params['temperature'] ?? '0.0',
+//                'format' => $params['format'] ?? 'json'
+//            ];
+//
+//            // Cleanup: Ensure temp file removal later
+//            register_shutdown_function(function () use ($tempFilePath) {
+//                if (file_exists($tempFilePath)) {
+//                    unlink($tempFilePath);
+//                }
+//            });
+//        } elseif (!empty($params['file']) && file_exists($params['file'])) {
+//            // Handle file path input
+//            $params = [
+//                'file' => curl_file_create($params['file'], mime_content_type($params['file']), basename($params['file'])),
+//                'language' => $params['language'] ?? 'en',
+//                'temperature' => $params['temperature'] ?? '0.0',
+//                'format' => $params['format'] ?? 'json'
+//            ];
+//        } else {
+//            throw new Exception("Whisper: File not found or invalid input. Provide either a file path or Base64 data.");
+//        }
+//    }
 
     private function formatMessagesForClaude(array $messages): string
     {
