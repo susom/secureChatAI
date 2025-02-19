@@ -64,7 +64,7 @@ abstract class BaseModelRequest implements ModelInterface {
     /**
      * @throws Exception
      */
-    public function executeAPICall(string $apiEndpoint, string $params): array {
+    public function executeAPICall(string $apiEndpoint, string|array $params): array {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $apiEndpoint);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);

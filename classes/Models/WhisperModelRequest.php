@@ -36,10 +36,10 @@ class WhisperModelRequest extends BaseModelRequest
      * Prepares request data by handling file uploads (Base64 or file path).
      *
      * @param array $params The request parameters.
-     * @return string JSON-encoded request data.
+     * @return array JSON-encoded request data.
      * @throws \Exception If file decoding, saving, or retrieval fails.
      */
-    private function prepareRequestData(array $params): string
+    private function prepareRequestData(array $params): array
     {
         $file = null;
 
@@ -69,11 +69,11 @@ class WhisperModelRequest extends BaseModelRequest
         // Create CURLFile object
         $curlFile = curl_file_create($file, mime_content_type($file), basename($file));
 
-        return json_encode([
+        return [
             'file' => $curlFile,
             'language' => $params['language'] ?? 'en',
             'temperature' => $params['temperature'] ?? '0.0',
             'format' => $params['format'] ?? 'json'
-        ]);
+        ];
     }
 }
