@@ -7,6 +7,7 @@ require_once "classes/SecureChatLog.php";
 require_once "classes/Models/ModelInterface.php"; // ✅ Ensure interface is loaded first
 require_once "classes/Models/BaseModelRequest.php";
 require_once "classes/Models/GPTModelRequest.php";
+require_once "classes/Models/WhisperModelRequest.php";
 
 use Google\Exception;
 use GuzzleHttp\Client;
@@ -114,8 +115,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     // SPECIAL CASE FOR WHISPER
                     case 'whisper':
                         $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams);
-                        $whisper->setHeaders(['Content-Type: multipart/form-data', 'Accept: application/json']);
-
+                        $whisper->setHeaders(['Content-Type: multipart/form-data','Accept: application/json']);
                         //Whisper model structure operates independently, set Auth key manually
                         $whisper->setAuthKeyName($modelConfig['whisper']['api_key_var'] ?? 'api-key');
                         $responseData = $whisper->sendRequest($api_endpoint, $params);
