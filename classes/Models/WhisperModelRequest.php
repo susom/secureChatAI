@@ -69,6 +69,7 @@ class WhisperModelRequest extends BaseModelRequest
         // Create CURLFile object
         $curlFile = curl_file_create($file, mime_content_type($file), basename($file));
 
+        // Whisper endpoint expects this as an array, not json_encoded string
         return [
             'file' => $curlFile,
             'language' => $params['language'] ?? 'en',
