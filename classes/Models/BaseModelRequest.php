@@ -25,7 +25,6 @@ abstract class BaseModelRequest implements ModelInterface {
         $this->modelId = $modelConfig['model_id'];
         $this->auth_key_name = $modelConfig['api_key_var'];
         $this->defaultParams = $defaultParams;
-
     }
 
     public function validateParams(array $params): void {
@@ -40,7 +39,7 @@ abstract class BaseModelRequest implements ModelInterface {
         }
     }
 
-    public function setHeaders($headers): void
+    public function setHeaders(array $headers): void
     {
         $this->headers = $headers;
     }
@@ -102,5 +101,15 @@ abstract class BaseModelRequest implements ModelInterface {
     }
     public static function normalizeResponse(array $response): array {
         return $response; // Override in subclasses as needed
+    }
+
+    public function getAuthKeyName(): string
+    {
+        return $this->auth_key_name;
+    }
+
+    public function setAuthKeyName(string $auth_key_name): void
+    {
+        $this->auth_key_name = $auth_key_name;
     }
 }
