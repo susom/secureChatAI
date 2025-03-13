@@ -17,6 +17,9 @@ class WhisperModelRequest extends BaseModelRequest
         $apiEndpoint = $this->appendAuthKey($apiEndpoint);
         $requestData = $this->prepareRequestData($params);
 
+        //Set required headers for whisper request
+        $this->setHeaders(['Content-Type: multipart/form-data','Accept: application/json']);
+
         return $this->executeApiCall($apiEndpoint, $requestData);
     }
 
