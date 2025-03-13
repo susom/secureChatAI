@@ -108,24 +108,25 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     // OLD WAY WHERE key APPENDED TO QueryString
                     case 'gpt-4o':
                     case 'ada-002':
-                        $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams);
+                    case 'o1': // FINAL pattern
+                    case 'o3-mini': // FINAL pattern
+                        $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams, $model);
                         $responseData = $gpt->sendRequest($api_endpoint, $params);
                         break;
 
                     // SPECIAL CASE FOR WHISPER
                     case 'whisper':
-                        $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams);
-                        $whisper->setHeaders(['Content-Type: multipart/form-data','Accept: application/json']);
+                        $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams, $model);
+
                         //Whisper model structure operates independently, set Auth key manually
                         $whisper->setAuthKeyName($modelConfig['whisper']['api_key_var'] ?? 'api-key');
                         $responseData = $whisper->sendRequest($api_endpoint, $params);
                         break;
 
-                    // "FINAL" PATTERN
-                    case 'o1':
-                    case 'o3-mini':
-                    case 'llama3370b': //Meta
-                        $this->prepareAIRequest($params, $headers, $api_key, $model, $model_id, $postfields);
+
+                    case 'llama3370b': // Meta - FINAL pattern
+                        $llama = new MetaModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                        $llama->sendRequest($api_endpoint, $params);
                         break;
 
                     // same "FINAL" PATTERN BUT SLIGHTY DIFFERENT FOR CLAUDE
@@ -277,27 +278,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             "generation_config" => $generationConfig,
             "safety_settings" => $safetySettings
         ]);
-    }
-
-    private function prepareAIRequest(&$params,  &$headers, $api_key, $model, $model_id, &$postfields)
-    {
-        $auth_key_name = $this->modelConfig[$model]['api_key_var'];
-        $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
-
-        $postfields = json_encode(
-            in_array($model, ['o1', 'o3-mini'])
-                ? [ // Specific params for `o1` and `o3-mini`
-                    "model" => $model_id,
-                    "messages" => $params['messages'] ?? [],
-                    "max_completion_tokens" => $this->defaultParams['max_tokens'],
-                    "reasoning_effort" => $params['reasoning_effort'] ?? $this->defaultParams['reasoning_effort']
-                ]
-                : array_merge( // Standard merging for other models (llama only)
-                    $this->defaultParams,
-                    $params,
-                    ["model" => $model_id, "messages" => $params['messages'] ?? []]
-                )
-        );
     }
 
     private function normalizeResponse($response, $model)
