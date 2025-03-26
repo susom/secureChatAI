@@ -30,27 +30,10 @@ class SecureChatLog extends ASEMLO
         $decoded = json_decode($message, true);
         $decoded['timestamp'] = $this->getValue('timestamp');
         $decoded['id'] = $this->getId();
+        $decoded['record'] = $this->getValue('record');
+
         return $decoded;
     }
-
-
-    /** SETTERS */
-
-    /**
-     * Add a note
-     * @param $note
-     * @return void
-     */
-//    public function addNote($note)
-//    {
-//        $note = $this->getValue('note') ?? '';
-//        $prefix = empty($note) ? "" : "\n----\n";
-//        $this->setValue('note',
-//            $prefix . "[" . date("Y-m-d H:i:s") . "] " .
-//            $note
-//        );
-//    }
-
 
     /** STATIC METHODS */
 
@@ -78,4 +61,15 @@ class SecureChatLog extends ASEMLO
         return $count === 0 ? [] : $objs;
     }
 
+
+    public static function getAllLogs($module, $offset)
+    {
+        $filter_clause = "order by log_id asc limit 1000 offset $offset";
+        $objs = self::queryObjects(
+            $module, $filter_clause, []
+        );
+
+        $count = count($objs);
+        return $count === 0 ? [] : $objs;
+    }
 }
