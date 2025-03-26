@@ -17,14 +17,16 @@ abstract class BaseModelRequest implements ModelInterface {
     protected array $defaultParams = [];
     protected string $auth_key_name;
     protected \Stanford\SecureChatAI\SecureChatAI $module;
+    protected string $model;
 
-    public function __construct($module, array $modelConfig, array $defaultParams) {
+    public function __construct($module, array $modelConfig, array $defaultParams, string $model) {
         $this->module = $module;
         $this->apiEndpoint = $modelConfig['api_url'];
         $this->apiKey = $modelConfig['api_token'];
         $this->modelId = $modelConfig['model_id'];
         $this->auth_key_name = $modelConfig['api_key_var'];
         $this->defaultParams = $defaultParams;
+        $this->$model = $model;
     }
 
     public function validateParams(array $params): void {

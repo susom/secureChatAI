@@ -11,9 +11,16 @@ function createTable($action, $index) {
     $totalTokens = $action['usage']['total_tokens'] ?? 'N/A';
     $model = $action['model'] ?? 'N/A';
     $project_id = $action['project_id'] ?? 'N/A';
+    $record = $action['record'] ?? 'N/A';
 
-    $queryDump = print_r($action['messages'], true);
-    $responseDump = str_replace('\\', '', $action['choices'][0]['message']['content']);
+    if($record === "SecureChatLogError"){
+        $responseDump = "N/A - Error";
+        $queryDump = strip_tags(htmlspecialchars_decode(stripslashes($action['message'])));
+    } else {
+        $responseDump = str_replace('\\', '', $action['choices'][0]['message']['content']);
+        $queryDump = print_r($action['messages'], true);
+    }
+
 
        // Unique IDs for each accordion based on row and column index
     $tokensId = "collapse-tokens-{$index}";
@@ -24,6 +31,7 @@ function createTable($action, $index) {
     return "<tr>
                 <td class='id-column'>{$id}</td>
                 <td class='project-id-column'>{$project_id}</td>
+                <td>{$record}</td>
                 <td>{$timestamp}</td>
                 <td>{$model}</td>
                 <td>
@@ -71,8 +79,8 @@ function createTable($action, $index) {
                             </h2>
                             <div id='{$queryId}' class='accordion-collapse collapse' aria-labelledby='heading-query-{$index}' data-bs-parent='#accordionQuery-{$index}'>
                                 <div class='accordion-body'>
-                                    <pre class='scrollable-content'><?= htmlspecialchars($queryDump) ?></pre>
-                                <div>
+                                    <pre class='scrollable-content'>$queryDump</pre>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -142,44 +150,87 @@ foreach ($a as $index => $v) {
             word-wrap: break-word;
         }
 
-        /* Adjust ID and Project ID columns to 5% width */Giver
-        .id-column, .project-id-column {
-            width: 5%;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+        /* Ensure the table does not auto-expand */
+        /*.table {*/
+        /*    table-layout: fixed;  !* Forces the table to maintain fixed column widths *!*/
+        /*}*/
 
-        /* Set fixed widths for the Query and Response columns */
+        /* Set the width of the Query and Response columns to 300px */
         .query-column, .response-column {
-            width: 25%;
+            width: 350px;  /* Fixed width for Query and Response columns */
+            max-width: 350px;  /* Prevents the columns from expanding beyond 300px */
             overflow: hidden;
             text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
-        /* Adjust other columns to split the remaining width */
-        .table th:not(.query-column):not(.response-column):not(.id-column):not(.project-id-column) {
-            width: 9%;
+        /* Ensure all other columns take up the remaining space */
+        .id-column, .project-id-column, .tokens-column, .meta-column, .timestamp-column, .model-column {
+            width: auto;
+        }
+
+
+        /* Prevent accordion content from affecting column width */
+        .accordion-collapse {
+            width: 100%;  /* Ensure the collapse area doesn't expand beyond its container */
             overflow: hidden;
-            text-overflow: ellipsis;
         }
 
-        .scrollable-content {
-            max-height: 120px;  /* Set the maximum height */
-            /*max-width: 20%;*/
-            overflow-y: auto;   /* Enable vertical scrolling */
+        .accordion-body {
+            max-height: 120px;  /* Set a maximum height for large content */
+            overflow-y: auto;   /* Enable scrolling if the content overflows */
             white-space: pre-wrap; /* Preserve whitespace and line breaks */
         }
-        /* Change cursor and background color on row hover */
-        #logTable tbody tr:hover,
-        #logTable tbody td:hover {
-            background-color: #f2f2f2 !important; /* Light grey background on hover */
-            cursor: pointer;
+
+
+        /* Adjust cell content handling */
+        .table td {
+            word-wrap: break-word;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        /* Ensure individual cells do not override the row hover effect */
-        #logTable tbody td {
-            background-color: inherit; /* Inherit background color from row hover */
-        }
+
+        /*!* Adjust ID and Project ID columns to 5% width *!Giver*/
+        /*.id-column, .project-id-column {*/
+        /*    width: 5%;*/
+        /*    overflow: hidden;*/
+        /*    text-overflow: ellipsis;*/
+        /*}*/
+
+        /*!* Set fixed widths for the Query and Response columns *!*/
+        /*.query-column, .response-column {*/
+        /*    width: 30%;  !* Adjust as needed *!*/
+        /*    max-width: 30%;*/
+        /*    word-wrap: break-word;*/
+        /*    overflow: hidden;*/
+        /*    text-overflow: ellipsis;*/
+        /*}*/
+
+        /*!* Adjust other columns to split the remaining width *!*/
+        /*.table th:not(.query-column):not(.response-column):not(.id-column):not(.project-id-column) {*/
+        /*    width: 9%;*/
+        /*    overflow: hidden;*/
+        /*    text-overflow: ellipsis;*/
+        /*}*/
+
+        /*.scrollable-content {*/
+        /*    max-height: 120px;  !* Set the maximum height *!*/
+        /*    !*max-width: 20%;*!*/
+        /*    overflow-y: auto;   !* Enable vertical scrolling *!*/
+        /*    white-space: pre-wrap; !* Preserve whitespace and line breaks *!*/
+        /*}*/
+        /*!* Change cursor and background color on row hover *!*/
+        /*#logTable tbody tr:hover,*/
+        /*#logTable tbody td:hover {*/
+        /*    background-color: #f2f2f2 !important; !* Light grey background on hover *!*/
+        /*    cursor: pointer;*/
+        /*}*/
+
+        /*!* Ensure individual cells do not override the row hover effect *!*/
+        /*#logTable tbody td {*/
+        /*    background-color: inherit; !* Inherit background color from row hover *!*/
+        /*}*/
     </style>
 </head>
 <body>
@@ -190,6 +241,7 @@ foreach ($a as $index => $v) {
         <tr>
             <th>ID</th>
             <th>Project ID</th>
+            <th>Type</th>
             <th>Timestamp</th>
             <th>Model</th>
             <th>Tokens</th>
@@ -208,7 +260,6 @@ foreach ($a as $index => $v) {
     $(document).ready(function() {
         $.fn.dataTable.ext.order['tokens-sort'] = function(settings, col) {
             return this.api().column(col, { order: 'index' }).nodes().map(function(td, i) {
-                // Extract the total tokens from the column data
                 var totalTokens = $(td).find('.accordion-button').text().match(/Total: (\d+)/);
                 return totalTokens ? parseInt(totalTokens[1], 10) : 0;
             });
@@ -226,34 +277,39 @@ foreach ($a as $index => $v) {
             "lengthMenu": [10, 25, 50, 75, 100],
             "columnDefs": [
                 {
-                    "targets": 4,    // The "Tokens" column
+                    "targets": 5,
                     "orderDataType": "tokens-sort"
                 }
             ]
         });
-        // Prevent accordion button click from triggering the row click event
+
+        // Ensure all accordions in the row expand/collapse together
         $('#logTable').on("click", ".accordion-button", function(event) {
-            event.stopPropagation();
-        });
+            event.stopPropagation(); // Prevent accidental row click behavior
+            event.preventDefault(); // Prevent triggering DataTable's column header click event
 
-        // Expand the accordion when a table row cell is clicked
-        $('#logTable').on("click", "tbody td", function() {
-            let accordionButtons = $(this).parent("tr").find('.accordion-button');
+            let row = $(this).closest("tr");
+            let isExpanding = row.find('.accordion-collapse.show').length === 0; // Check if any are open
 
-            // Iterate over each accordion button in the row
-            accordionButtons.each(function() {
+            row.find('.accordion-button').each(function() {
                 let button = $(this);
                 let target = button.attr('data-bs-target');
-                let isCollapsed = button.hasClass('collapsed');
-                // Toggle the collapsed class and accordion
-                if (isCollapsed) {
-                    button.removeClass('collapsed')
+
+                if (isExpanding) {
+                    button.removeClass('collapsed').attr('aria-expanded', true);
                     $(target).addClass('show').collapse('show');
                 } else {
                     button.addClass('collapsed').attr('aria-expanded', false);
                     $(target).removeClass('show').collapse('hide');
                 }
             });
+        });
+
+        // Ensure click events on the table header do not trigger when clicking inside accordion button area
+        $('#logTable').on('click', 'th', function(event) {
+            if ($(event.target).closest('.accordion-button').length > 0) {
+                event.stopImmediatePropagation();  // Prevent sorting trigger when clicking inside accordion button
+            }
         });
     });
 </script>
