@@ -67,7 +67,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     public function getSecureChatLogs($offset)
     {
         $offset = intval($offset);
-        return SecureChatLog::getLogs($this, '52', $offset);
+        return SecureChatLog::getAllLogs($this, $offset);
     }
 
 
