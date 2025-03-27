@@ -64,7 +64,7 @@ abstract class BaseModelRequest implements ModelInterface {
     /**
      * @throws Exception
      */
-    public function executeAPICall(string $apiEndpoint, string|array $params): array {
+    public function executeAPICall(string $apiEndpoint, string|array $params): string {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $apiEndpoint);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -94,11 +94,7 @@ abstract class BaseModelRequest implements ModelInterface {
 
         curl_close($ch);
 
-        $decodedResponse = json_decode($response, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new Exception("JSON decode error: " . json_last_error_msg());
-        }
-        return $decodedResponse;
+        return $response;
     }
     public static function normalizeResponse(array $response): array {
         return $response; // Override in subclasses as needed
