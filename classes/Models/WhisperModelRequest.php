@@ -12,13 +12,26 @@ class WhisperModelRequest extends BaseModelRequest
      * @return array The API response.
      * @throws \Exception If the request fails.
      */
-    public function sendRequest(string $apiEndpoint, array $params): array
-    {
+    public function sendRequest(string $apiEndpoint, array $params): array {
         $apiEndpoint = $this->appendAuthKey($apiEndpoint);
         $requestData = $this->prepareRequestData($params);
-
-        return $this->executeApiCall($apiEndpoint, $requestData);
+        $rawResponse = $this->executeApiCall($apiEndpoint, $requestData);
+    
+        $format = strtolower($params['response_format'] ?? 'json');
+    
+        if (in_array($format, ['srt', 'vtt', 'text'])) {
+            return ['text' => $rawResponse, 'format' => $format];
+        }
+    
+        // Safely decode for JSON formats
+        $decoded = json_decode($rawResponse, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \Exception("JSON decode error: " . json_last_error_msg());
+        }
+    
+        return $decoded;
     }
+    
 
     /**
      * Appends the authentication key to the API endpoint.
@@ -74,7 +87,7 @@ class WhisperModelRequest extends BaseModelRequest
             'file' => $curlFile,
             'language' => $params['language'] ?? 'en',
             'temperature' => $params['temperature'] ?? '0.0',
-            'format' => $params['format'] ?? 'json'
+            'response_format' => $params['response_format'] ?? 'json'
         ];
     }
 }

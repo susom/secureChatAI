@@ -16,8 +16,14 @@ class GPTModelRequest extends BaseModelRequest {
     {
         $apiEndpoint = $this->appendAuthKey($apiEndpoint);
         $requestData = $this->prepareRequestData($params);
+        $response = $this->executeApiCall($apiEndpoint, $requestData);
 
-        return $this->executeApiCall($apiEndpoint, $requestData);
+        $decoded = json_decode($response, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \Exception("JSON decode error in GPTModelRequest: " . json_last_error_msg());
+        }
+
+        return $decoded;    
     }
 
     /**
