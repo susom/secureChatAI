@@ -64,11 +64,12 @@ abstract class BaseModelRequest implements ModelInterface {
     /**
      * @throws Exception
      */
-    public function executeAPICall(string $apiEndpoint, string|array $params): string {
+    public function executeAPICall(string $apiEndpoint, string|array $params, array $headers = null): string {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $apiEndpoint);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $this->headers);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers ?? $this->headers);
+
         //TODO INcorporate per model timeout??
         curl_setopt($ch, CURLOPT_TIMEOUT, 500);
         curl_setopt($ch, CURLOPT_POST, true);
