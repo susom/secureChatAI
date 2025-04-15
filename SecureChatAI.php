@@ -8,6 +8,7 @@ require_once "classes/Models/ModelInterface.php"; // ✅ Ensure interface is loa
 require_once "classes/Models/BaseModelRequest.php";
 require_once "classes/Models/GPTModelRequest.php";
 require_once "classes/Models/WhisperModelRequest.php";
+require_once "classes/Models/GeminiModelRequest.php";
 
 use Google\Exception;
 use GuzzleHttp\Client;
@@ -134,8 +135,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         break;
 
                     // WILDLY DIFFERENT PATTERN FOR GEMINI
-                    case "gemini15pro":
-                        $this->prepareGeminiRequest($params, $headers, $api_key, $model, $postfields);
+                    case "gemini20flash":
+                        $gemini = new GeminiModelRequest($this, $modelConfig, $this->defaultParams);
+                        $responseData = $gemini->sendRequest($api_endpoint, $params);
                         break;
 
                     default:
@@ -214,71 +216,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         ]);
     }
 
-    private function prepareGeminiRequest(&$params, &$headers, $api_key, $model, &$postfields)
-    {
-        $auth_key_name = $this->modelConfig[$model]['api_key_var'] ;
-        $headers = [
-            'Content-Type: application/json',
-            "$auth_key_name: $api_key"
-        ];
-
-        $messages = $params['messages'] ?? [];
-        $geminiMessages = [];
-        $systemContext = "";
-
-        // Process messages to convert "system" role
-        foreach ($messages as $msg) {
-            if ($msg["role"] === "system") {
-                // Collect system messages as context
-                $systemContext .= trim($msg["content"]) . "\n\n";
-            } else {
-                // Convert normal messages
-                $geminiMessages[] = [
-                    "role" => $msg["role"],
-                    "parts" => [["text" => trim($msg["content"])]]
-                ];
-            }
-        }
-
-        // If system context exists, inject it into the first user message
-        if (!empty($systemContext)) {
-            if (!empty($geminiMessages) && $geminiMessages[0]["role"] === "user") {
-                // Prepend system context to first user message
-                $geminiMessages[0]["parts"][0]["text"] = $systemContext . $geminiMessages[0]["parts"][0]["text"];
-            } else {
-                // Otherwise, create a new user message for system context
-                array_unshift($geminiMessages, [
-                    "role" => "user",
-                    "parts" => [["text" => $systemContext]]
-                ]);
-            }
-        }
-
-        // Define generation config
-        $generationConfig = [
-            "temperature" => $this->defaultParams['temperature'],
-            "topP" => $this->defaultParams['top_p'],
-            "max_output_tokens" => $this->defaultParams['max_tokens'],
-            "stop_sequences" => $this->defaultParams['stop'] ?? null, // Stop sequences if provided
-            "frequency_penalty" => $this->defaultParams['frequency_penalty'],
-            "presence_penalty" => $this->defaultParams['presence_penalty'],
-        ];
-
-        // Optional safety settings (can be adjusted)
-        $safetySettings = [
-            [
-                "category" => "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold" => "BLOCK_LOW_AND_ABOVE"
-            ]
-        ];
-
-        $postfields = json_encode([
-            "contents" => $geminiMessages,
-            "generation_config" => $generationConfig,
-            "safety_settings" => $safetySettings
-        ]);
-    }
-
     private function prepareAIRequest(&$params,  &$headers, $api_key, $model, $model_id, &$postfields)
     {
         $auth_key_name = $this->modelConfig[$model]['api_key_var'];
@@ -326,26 +263,22 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
                 'total_tokens' => $response['usage']['total_tokens'] ?? 0
             ];
-        } elseif ($model === 'gemini15pro') {
-            // Collect all text parts across multiple candidates
+        } elseif ($model === 'gemini20flash') {
             $contentParts = [];
-            foreach ($response as $resp) {
-                if (!empty($resp['candidates'][0]['content']['parts'])) {
-                    foreach ($resp['candidates'][0]['content']['parts'] as $part) {
-                        if (!empty($part['text'])) {
-                            $contentParts[] = $part['text'];
-                        }
+
+            foreach ($response as $chunk) {
+                $parts = $chunk['candidates'][0]['content']['parts'] ?? [];
+                foreach ($parts as $part) {
+                    if (!empty($part['text'])) {
+                        $contentParts[] = $part['text'];
                     }
                 }
             }
 
-            // Join all content pieces into one response
             $normalized['content'] = implode(" ", $contentParts);
-
-            $normalized['role'] = "assistant";
+            $normalized['role'] = $response[0]['candidates'][0]['content']['role'] ?? "model";
             $normalized['model'] = $response[0]['modelVersion'] ?? $model;
 
-            // Extract token usage from the last response chunk (assuming it's in the last index)
             $usage = end($response)['usageMetadata'] ?? [];
             $normalized['usage'] = [
                 'prompt_tokens' => $usage['promptTokenCount'] ?? 0,
@@ -357,57 +290,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             $normalized = $response;
         }
 
+        $this->emDebug("normalized responseData", $normalized);
         return $normalized;
     }
-
-    private function executeApiCall($api_endpoint, $headers, $postfields)
-    {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $api_endpoint);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        curl_setopt($ch, CURLOPT_POST, true);
-
-        // Handle multipart form-data or JSON
-        if (is_array($postfields)) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $postfields);
-        } else {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $postfields);
-        }
-
-        // Temporary manual DNS resolution
-        // TODO: Remove this block once proper DNS resolution is restored
-        curl_setopt($ch, CURLOPT_RESOLVE, [
-            'apim.stanfordhealthcare.org:443:10.249.134.5',
-            'som-redcap-whisper.openai.azure.com:443:10.153.192.4',
-            'som-redcap.openai.azure.com:443:10.249.50.7'
-        ]);
-
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-        if (curl_errno($ch)) {
-            throw new Exception('cURL error: ' . curl_error($ch));
-        }
-
-        if ($http_code < 200 || $http_code >= 300) {
-            throw new Exception('HTTP error: ' . $http_code . ' - Response: ' . $response);
-        }
-
-        curl_close($ch);
-
-        if (is_array($response)) {
-            return $response;
-        }
-
-        $decodedResponse = json_decode($response, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new Exception("JSON decode error: " . json_last_error_msg());
-        }
-        return $decodedResponse;
-    }
-
 
     private function logInteraction($project_id, $requestData, $responseData)
     {
