@@ -48,8 +48,13 @@ class GPTModelRequest extends BaseModelRequest {
     {
         $mergedParams = array_merge($this->defaultParams, $params);
 
+        if (!empty($params['response_format'])) {
+            $mergedParams['response_format'] = $params['response_format'];
+        }
+
         // Manually removing default param, breaks regular gpt calls
         unset($mergedParams["reasoning_effort"]);
+        
         return json_encode($mergedParams) ?: '[]';
     }
 }
