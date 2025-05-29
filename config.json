@@ -21,11 +21,6 @@
         }
     ],
     "framework-version": 14,
-    "permissions": [
-        "redcap_module_system_enable",
-        "redcap_module_project_enable",
-        "redcap_module_save_configuration"
-    ],
     "enable-every-page-hooks-on-system-pages": false,
     "enable-no-auth-logging": true,
     "links": {
