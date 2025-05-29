@@ -1,0 +1,46 @@
+<?php
+namespace Stanford\SecureChatAI;
+
+class GenericModelRequest extends BaseModelRequest
+{
+    public function sendRequest(string $apiEndpoint, array $params): array
+    {
+        $mergedParams = array_merge($this->defaultParams, $params);
+        $mergedParams['model'] = $this->modelId;
+
+        // Handle json_schema wrapping if present
+        if (isset($mergedParams['json_schema'])) {
+            $mergedParams['response_format'] = [
+                'type' => 'json_schema',
+                'json_schema' => $mergedParams['json_schema']
+            ];
+            unset($mergedParams['json_schema']);
+        }
+
+        $postfields = json_encode($mergedParams);
+
+
+        // Dynamically decide if the key should be in header or query string
+        $keyHeaderName = $this->auth_key_name;
+        $headers = ["Content-Type: application/json", "Accept: application/json"];
+
+        if (str_starts_with(strtolower($keyHeaderName), 'ocp-') || str_contains($keyHeaderName, 'Subscription')) {
+            // Azure-style: send as header
+            $headers[] = "$keyHeaderName: {$this->apiKey}";
+        } else {
+            // Legacy OpenAI style: send as query string
+            $separator = str_contains($apiEndpoint, '?') ? '&' : '?';
+            $apiEndpoint .= "{$separator}{$keyHeaderName}={$this->apiKey}";
+        }
+
+        $this->module->emDebug("Sending GenericModelRequest", [
+            'endpoint' => $apiEndpoint,
+            'headers' => $headers,
+            'postfields' => $mergedParams
+        ]);
+
+        $rawResponse = $this->executeAPICall($apiEndpoint, $postfields, $headers);
+        return json_decode($rawResponse, true);
+    }
+
+}
