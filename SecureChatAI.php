@@ -9,6 +9,8 @@ require_once "classes/Models/BaseModelRequest.php";
 require_once "classes/Models/GPTModelRequest.php";
 require_once "classes/Models/WhisperModelRequest.php";
 require_once "classes/Models/GeminiModelRequest.php";
+require_once "classes/Models/ClaudeModelRequest.php";
+require_once "classes/Models/GenericModelRequest.php";
 
 use Google\Exception;
 use GuzzleHttp\Client;
@@ -71,6 +73,41 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return SecureChatLog::getLogs($this, '52', $offset);
     }
 
+    private function filterDefaultParamsForModel($model, $params) {
+        $filtered = $this->defaultParams;
+    
+        // Only o1/o3-mini get reasoning_effort
+        if (!in_array($model, ['o1', 'o3-mini'])) {
+            unset($filtered['reasoning_effort'], $params['reasoning_effort']);
+        }
+    
+        // Only models supporting json_schema
+        $schemaModels = ['gpt-4.1', 'o1', 'o3-mini', 'llama3370b'];
+        if (!in_array($model, $schemaModels)) {
+            unset($params['json_schema']);
+        }
+    
+        // o1/o3-mini have strict param set
+        if (in_array($model, ['o1', 'o3-mini'])) {
+            // Only allow these keys
+            $keys = ['model', 'messages', 'max_completion_tokens', 'reasoning_effort'];
+            $merged = [
+                'model' => $model,
+                'messages' => $params['messages'] ?? [],
+                'max_completion_tokens' => $params['max_completion_tokens'] ?? ($params['max_tokens'] ?? 800),
+            ];
+            if (isset($params['reasoning_effort'])) {
+                $merged['reasoning_effort'] = $params['reasoning_effort'];
+            }
+            return $merged;
+        }
+    
+        // Remove max_tokens for o1/o3-mini (should never hit, but safe)
+        unset($filtered['max_tokens'], $params['max_tokens']);
+    
+        // Default merge for other models
+        return array_merge($filtered, $params);
+    }
 
     public function callAI($model, $params = [], $project_id = null)
     {
@@ -123,15 +160,20 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         break;
 
                     // "FINAL" PATTERN
+                    case 'gpt-4.1':
                     case 'o1':
                     case 'o3-mini':
-                    case 'llama3370b': //Meta
-                        $this->prepareAIRequest($params, $headers, $api_key, $model, $model_id, $postfields);
+                    case 'llama3370b':
+                    case 'llama-Maverick': 
+                        // Execute the API call
+                        $generic = new GenericModelRequest($this, $modelConfig, $this->filterDefaultParamsForModel($model, $params));
+                        $responseData = $generic->sendRequest($api_endpoint, $params);
                         break;
 
                     // same "FINAL" PATTERN BUT SLIGHTY DIFFERENT FOR CLAUDE
                     case 'claude':
-                        $this->prepareClaudeRequest($params, $headers, $api_key, $model_id, $postfields);
+                        $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams);
+                        $responseData = $claude->sendRequest($api_endpoint, $params);
                         break;
 
                     // WILDLY DIFFERENT PATTERN FOR GEMINI
@@ -144,8 +186,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         throw new Exception("Unsupported model configuration for: $model");
                 }
 
-                // Execute the API call
-//                $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
                 $normalizedResponse = $this->normalizeResponse($responseData, $model);
 
                 // Log interaction only if project_id is available
@@ -177,66 +217,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
     }
 
-    private function formatMessagesForClaude(array $messages): string
-    {
-        $formatted = [];
-        foreach ($messages as $message) {
-            $role = ucfirst($message['role']);
-            $content = trim($message['content']);
-            $formatted[] = "{$role}: {$content}";
-        }
-        return implode("\n\n", $formatted); // Separate messages with double newlines for clarity
-    }
-
-    private function prepareClaudeRequest(&$params, &$headers, $api_key, $model_id, &$postfields)
-    {
-        $auth_key_name = $this->modelConfig['claude']['api_key_var'];
-        $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
-
-        // Format messages using existing helper
-        $prompt_text = isset($params['messages'])
-            ? $this->formatMessagesForClaude($params['messages'])
-            : ($params['prompt_text'] ?? '');
-
-        if (empty($prompt_text)) {
-            throw new Exception('Claude API requires prompt_text in the request body.');
-        }
-
-        // only Claude-supported keys
-        $parameters = [
-            "temperature" => $this->defaultParams['temperature'],
-            "top_p" => $this->defaultParams['top_p'],
-            "max_tokens" => $this->defaultParams['max_tokens']
-        ];
-
-        $postfields = json_encode([
-            "model_id" => $model_id,  // ✅ Keeps Claude’s expected `model_id`
-            "prompt_text" => $prompt_text, // ✅ Keeps Claude’s expected `prompt_text`
-            "parameters" => $parameters // ✅ Adds tuning options without breaking Claude
-        ]);
-    }
-
-    private function prepareAIRequest(&$params,  &$headers, $api_key, $model, $model_id, &$postfields)
-    {
-        $auth_key_name = $this->modelConfig[$model]['api_key_var'];
-        $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
-
-        $postfields = json_encode(
-            in_array($model, ['o1', 'o3-mini'])
-                ? [ // Specific params for `o1` and `o3-mini`
-                    "model" => $model_id,
-                    "messages" => $params['messages'] ?? [],
-                    "max_completion_tokens" => $this->defaultParams['max_tokens'],
-                    "reasoning_effort" => $params['reasoning_effort'] ?? $this->defaultParams['reasoning_effort']
-                ]
-                : array_merge( // Standard merging for other models (llama only)
-                    $this->defaultParams,
-                    $params,
-                    ["model" => $model_id, "messages" => $params['messages'] ?? []]
-                )
-        );
-    }
-
     private function normalizeResponse($response, $model)
     {
         // $this->emDebug("API responseData for normalizeResponse", $model, $response);
@@ -253,8 +233,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'completion_tokens' => $response['usage']['output_tokens'] ?? 0,
                 'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
             ];
-        } elseif (in_array($model, ['o1', 'o3-mini', "gpt-4o", "llama3370b"])) {
-            // Extract content from o1 and o3-mini responses
+        } elseif (in_array($model, [
+            'o1', 'o3-mini', 'gpt-4o', 'llama3370b', 'gpt-4.1', 'llama-Maverick'
+        ])) {
             $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
             $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';
             $normalized['model'] = $response['model'] ?? $model;
@@ -296,7 +277,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     private function logInteraction($project_id, $requestData, $responseData)
     {
-        $payload = array_merge($requestData, $responseData);
+        $payload = array_merge($requestData, $responseData ?? []);
         $payload['project_id'] = $project_id;
         $action = new SecureChatLog($this);
 
