@@ -37,12 +37,6 @@ class GenericModelRequest extends BaseModelRequest
             $apiEndpoint .= "{$separator}{$keyHeaderName}={$this->apiKey}";
         }
 
-        $this->module->emDebug("Sending GenericModelRequest", [
-            'endpoint' => $apiEndpoint,
-            'headers' => $headers,
-            'postfields' => $mergedParams
-        ]);
-
         $rawResponse = $this->executeAPICall($apiEndpoint, $postfields, $headers);
         return json_decode($rawResponse, true);
     }

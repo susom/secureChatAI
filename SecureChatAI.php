@@ -74,35 +74,40 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     private function filterDefaultParamsForModel($model, $params)
     {
-        $filtered = $this->defaultParams;
+        // Merge first so $params values override defaults
+        $merged = array_merge($this->defaultParams, $params);
 
         // Only o1/o3-mini get reasoning_effort
         if (!in_array($model, ['o1', 'o3-mini'])) {
-            unset($filtered['reasoning_effort'], $params['reasoning_effort']);
+            unset($merged['reasoning_effort']);
         }
 
         // Only models supporting json_schema
         $schemaModels = ['gpt-4.1', 'o1', 'o3-mini', 'llama3370b'];
         if (!in_array($model, $schemaModels)) {
-            unset($params['json_schema']);
+            unset($merged['json_schema']);
         }
 
-        // o1/o3-mini have strict param set
+        // Only o1/o3-mini have strict param set
         if (in_array($model, ['o1', 'o3-mini'])) {
-            $merged = [
+            $strict = [
                 'model' => $model,
-                'messages' => $params['messages'] ?? [],
-                'max_completion_tokens' => $params['max_completion_tokens'] ?? ($params['max_tokens'] ?? 800),
+                'messages' => $merged['messages'] ?? [],
+                'max_completion_tokens' => $merged['max_completion_tokens'] ?? ($merged['max_tokens'] ?? 800),
             ];
-            if (isset($params['reasoning_effort'])) {
-                $merged['reasoning_effort'] = $params['reasoning_effort'];
+            if (isset($merged['reasoning_effort'])) {
+                $strict['reasoning_effort'] = $merged['reasoning_effort'];
             }
-            return $merged;
+            return $strict;
         }
 
-        unset($filtered['max_tokens'], $params['max_tokens']);
-        return array_merge($filtered, $params);
+        // Remove max_tokens for all non-o1/o3-mini
+        unset($merged['max_tokens']);
+
+        return $merged;
     }
+
+
 
     public function callAI($model, $params = [], $project_id = null)
     {
@@ -145,8 +150,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     case 'o3-mini':
                     case 'llama3370b':
                     case 'llama-Maverick':
-                        $generic = new GenericModelRequest($this, $modelConfig, $this->filterDefaultParamsForModel($model, $params), $model);
-                        $responseData = $generic->sendRequest($api_endpoint, $params);
+                        $filteredParams = $this->filterDefaultParamsForModel($model, $params);
+                        $generic = new GenericModelRequest($this, $modelConfig, [], $model); // just leave defaultParams empty or as truly static defaults
+                        $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
                         break;
                     case 'claude':
                         $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams, $model);
