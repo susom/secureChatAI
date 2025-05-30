@@ -23,7 +23,7 @@ class GPTModelRequest extends BaseModelRequest {
             throw new \Exception("JSON decode error in GPTModelRequest: " . json_last_error_msg());
         }
 
-        return $decoded;    
+        return $decoded;
     }
 
     /**
@@ -47,14 +47,7 @@ class GPTModelRequest extends BaseModelRequest {
     private function prepareRequestData(array $params): string
     {
         $mergedParams = array_merge($this->defaultParams, $params);
-
-        if (!empty($params['response_format'])) {
-            $mergedParams['response_format'] = $params['response_format'];
-        }
-
-        // Manually removing default param, breaks regular gpt calls
-        unset($mergedParams["reasoning_effort"]);
-        
+        unset($mergedParams["reasoning_effort"]); // Remove unsupported key for GPT-4o
         return json_encode($mergedParams) ?: '[]';
     }
 }

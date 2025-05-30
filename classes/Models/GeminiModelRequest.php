@@ -5,8 +5,8 @@ namespace Stanford\SecureChatAI;
 class GeminiModelRequest extends BaseModelRequest {
     private $em;
 
-    public function __construct($em, array $modelConfig, array $defaultParams) {
-        parent::__construct($em, $modelConfig, $defaultParams); // pass $em as $module
+    public function __construct($em, array $modelConfig, array $defaultParams, string $model) {
+        parent::__construct($em, $modelConfig, $defaultParams, $model);
         $this->em = $em;
     }
     

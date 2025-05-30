@@ -11,7 +11,8 @@ use ExternalModules\ExternalModules;
  */
 class ASEMLO
 {
-    const OBJECT_NAME     = 'SecureChatLog';     // Object name (defaults to class name) - can be overwritten by parent object
+    const OBJECT_NAME     = 'SecureChatLog'; // Object name (defaults to class name) - can be overwritten by parent object
+    const ERROR_OBJECT_NAME = 'SecureChatLogError';
     const NAME_COLUMN     = 'record'; // typically 'message' or 'record' - recommend using record unless you need
                                       // the built-in record logging functionality
     const LOG_OBJECT_NAME = null;     // Will default to class name+'_LOG' unless set in parent class
@@ -59,9 +60,9 @@ class ASEMLO
 
             // Query all data for primary columns and specified parameter columns
             $available_columns = array_unique(array_merge(self::PRIMARY_UPDATABLE_COLUMNS, self::PRIMARY_FIXED_COLUMNS, $limit_params));
-            $sql = "select " . implode(", ", $available_columns) . " where log_id=? and " . static::NAME_COLUMN . "=?";
+            $sql = "select " . implode(", ", $available_columns) . " where log_id=? and " . static::NAME_COLUMN . " in (?, ?) ";
             // $module->emDebug("Load Sql: " . $sql);
-            $q = $module->queryLogs($sql, [$log_id, self::getObjectName()]);
+            $q = $module->queryLogs($sql, [$log_id, self::getObjectName(), self::getErrorObjectName()]);
             if ($row = $q->fetch_assoc()) {
                 $this->setValues($row,false);
                 // foreach ($row as $key=>$val) {
@@ -401,6 +402,10 @@ class ASEMLO
         return is_null(static::OBJECT_NAME) ? substr(strrchr(static::class, '\\'), 1) : static::OBJECT_NAME;
     }
 
+    private static function getErrorObjectName() {
+        return is_null(static::ERROR_OBJECT_NAME) ? substr(strrchr(static::class, '\\'), 1) : static::ERROR_OBJECT_NAME;
+    }
+
     /**
      * Determine the name of the object for storing logs
      * @return string|null
@@ -449,9 +454,13 @@ class ASEMLO
             throw Exception ("query filter must have parameter for each question mark");
         }
 
+        // Querying logs across all projects
+        if(count($parameters) === 0)
+            $sql = "select log_id where " . static::NAME_COLUMN . " in (?, ?) " . $filter_clause;
+        else
+            $sql = "select log_id where " . static::NAME_COLUMN . " in (?, ?) " . (empty($filter_clause) ? "" : " and " . $filter_clause);
 
-        $sql = "select log_id where " . static::NAME_COLUMN . "= ?" . (empty($filter_clause) ? "" : " and " . $filter_clause);
-        $params = array_merge([self::getObjectName()], $parameters);
+        $params = array_merge([self::getObjectName(), self::getErrorObjectName()], $parameters);
         $module->emDebug($sql, $params);
 
         $result = $framework->queryLogs($sql,$params);
@@ -479,6 +488,4 @@ class ASEMLO
         }
         return $results;
     }
-
-
 }
