@@ -1,202 +1,153 @@
-# SecureChat
-SecureChat is an External Module (EM) designed to access Stanford's instance of OpenAI models, Secure Chat AI.
+# SecureChatAI External Module (EM)
 
-**Requirement:** Connection to SOM or SHC's VPN.
+SecureChatAI is a REDCap External Module that provides a unified interface to Stanford’s Secure AI endpoints—including OpenAI (GPT-4o, GPT-4.1, Ada), Gemini, Claude, Llama, and more.
+**Requires VPN connection to SOM/SHC.**
 
-## Logging
-Every interaction with the API is logged to `emLogs`, tracking input/output tokens and project ID.
+---
 
-## Usage from Other Project EMs
+## Features
+
+* **Unified interface:** Call any supported model (`gpt-4o`, `gpt-4.1`, `gemini20flash`, `claude`, `llama-Maverick`, etc) via a single function.
+* **Auto-param filtering:** Only sends parameters the chosen model supports; avoids 400 errors from unexpected params.
+* **Robust error logging:** All interactions, errors, and usage stats are logged to emLogger.
+* **Easy to extend:** Add new models with minimal code changes.
+
+---
+
+## Basic Usage
+
 ```php
-$moduleDirectoryPrefix = "secure_chat_ai"; // Module prefix of your target system-level module
-$messages = [...]; // Data you want to pass to callAI
-$params = [...];
-$model = "gpt-4o"; // or "ada-002" for embeddings
-$em = \ExternalModules\ExternalModules::getModuleInstance($moduleDirectoryPrefix);
-$result = $em->callAI($model, $params, $project_id);
-```
+// Get module instance (from another EM)
+$em = \ExternalModules\ExternalModules::getModuleInstance("secure_chat_ai");
 
-Usage of different models might require alternate parameters. See the example calls below for information:
-
-## Example call (GPT-4o)
-```php
-$model = "gpt-4o";
+// Prepare parameters for your model
 $messages = [
-    [
-        'role' => 'system',
-        'content' => 'What is 1+1'
-    ]
+    ["role" => "user", "content" => "Say hi from SecureChatAI!"]
 ];
-$params = {
-    'temperature' => 0.7
-    'top_p' => 0.9
-    'frequency_penalty' => 0.5
-    'presence_penalty' => 0
-    'max_tokens' => 4096,
-    'messages' => $messages
-}
-$project_id = 108;
-
-$response = $this->callAI($model, $params, $project_id);
-```
-## Example call (ADA-002)
-```php
-$model = "ada-002";
-$input = "What is 2+2?"
-
-$response = $this->callAI($model, ['input' => $input]);
-```
-
-## Example call (Whisper - Transcription)
-```php
-$model = "whisper";
-$inputFile = "/path/to/audio/file.wav"; // Path to the audio file
 $params = [
-    'input' => $inputFile,
-    'language' => 'en',
-    'temperature' => 0.0,
-    'format' => 'json',
-    'initial_prompt' => 'Delineate between speakers',
-    'prompt' => 'Make any corrections to misheard speech if possible to deduce'
+    'messages' => $messages,
+    'temperature' => 0.7,   // Optional; see below
+    'max_tokens' => 512     // Optional; see below
 ];
-$project_id = 108;
+$model = "gpt-4o"; // or "o1", "gemini20flash", etc.
+$project_id = 108; // Optional
 
-$response = $this->callAI($model, $params, $project_id);
+// Call the model
+$response = $em->callAI($model, $params, $project_id);
 ```
 
+**Result:**
+Normalized associative array with content, model, and token usage.
 
-## AI Endpoint (ChatML)
-Expected input:
-```json
+---
+
+## Model Support & Example Calls
+
+* **Chat Models** (`gpt-4o`, `gpt-4.1`, `o1`, `o3-mini`, `llama3370b`, `llama-Maverick`, `gemini20flash`, `claude`)
+
+  * Pass `messages` as array of ChatML objects (`role` + `content`).
+  * Only include parameters supported by the target model.
+* **Embeddings** (`ada-002`)
+
+  * Pass `input` as a string.
+* **Transcription** (`whisper`)
+
+  * Pass `file` (path to audio file), `language`, etc.
+
+**Example:**
+
+```php
+// GPT-4o
+$em->callAI("gpt-4o", ['messages' => $messages]);
+
+// Ada-002 Embedding
+$em->callAI("ada-002", ['input' => 'The quick brown fox']);
+
+// Whisper
+$em->callAI("whisper", [
+    'file' => '/path/to/audio.wav',
+    'language' => 'en'
+]);
+```
+
+---
+
+## Response Format
+
+All chat model responses are normalized:
+
+```php
 [
-    {"role":"system", "content":"context text"},
-    {"role":"user", "content":"early user query"},
-    {"role":"assistant", "content":"previous ai response"},
-    {"role":"user", "content":"newest user query"}
+    'content' => 'AI response text',
+    'role' => 'assistant',
+    'model' => 'gpt-4o',
+    'usage' => [
+        'prompt_tokens' => 16,
+        'completion_tokens' => 20,
+        'total_tokens' => 36
+    ]
 ]
 ```
-Expected output :
-```json
-[
-    {
-        "role": "assistant",
-        "content": "reponse content from AI",
-        "id": "abcxyz123",
-        "model": "gpt-4o-2024-05-13",
-        "usage": {
-            "completion_tokens": 125,
-            "prompt_tokens": 1315,
-            "total_tokens": 1440
-        }
-    }
-]
-```
 
+Embeddings:
 
-## Embeddings Endpoint (RAG workflow)
-```json
-"RAW TEXT INPUT"
-```
-Expected output :
-```json
+```php
 [
     0.0015534189,
     -0.016994879,
-    -0.0012200507,
-    0.0027190577,
-    ...,
-    ...,
-    etc
+    // ...
 ]
 ```
 
-## gpt-4o Model Parameters with Default Values (*Configurable in EM Settings)
+---
 
-### Temperature*
-- **Description**: Controls the randomness of the model's output.
-- **Range**: 0.0 to 1.0
-- **Effect**: Lower values (e.g., 0.2) make the output more deterministic, while higher values (e.g., 0.8) increase randomness.
+## Model Parameters
 
-### top_p*
-- **Description**: Implements nucleus sampling, selecting tokens with the highest cumulative probability.
-- **Range**: 0.0 to 1.0
-- **Effect**: Lower values (e.g., 0.5) narrow token selection, while higher values (e.g., 0.9) broaden it.
+* **temperature, top\_p, frequency\_penalty, presence\_penalty, max\_tokens**
 
-### frequency_penalty*
-- **Description**: Adjusts token usage likelihood based on its frequency so far.
-- **Range**: -2.0 to 2.0
-- **Effect**: Positive values reduce repetition, while negative values encourage it.
+  * Most chat models accept these. Defaults are configurable in the EM settings.
+  * Only supported parameters are sent to each model.
+* **reasoning\_effort**
 
-### presence_penalty*
-- **Description**: Adjusts token usage likelihood based on its presence so far.
-- **Range**: -2.0 to 2.0
-- **Effect**: Positive values reduce new topic generation, while negative values encourage it.
+  * Only for `o1`, `o3-mini`.
+* **json\_schema**
 
-### max_tokens*
-- **Description**: Sets the maximum number of tokens to generate.
-- **Range**: 1 to 2048 (depending on model and context length)
-- **Effect**: Determines response length. Higher values allow for longer responses.
+  * Only for models supporting function calling/schema output (`gpt-4.1`, `o1`, etc).
 
-### stop
-- **Description**: A string or array of strings specifying where the model should stop generating further tokens.
-- **Range**: Any string or array of strings
-- **Effect**: If any specified stop sequences are encountered, the model stops generating further tokens.
+See **EM configuration** for full list and defaults.
 
-## Whisper Model Parameters with Default Values (*Configurable in EM Settings)
+---
 
-### Language
-- **Key**: `language`
-- **Type**: `string`
-- **Example**: `"en"` (for English)
-- **Default**: None (Must be specified if needed)
+## Logging
 
-### Temperature
-- **Key**: `temperature`
-- **Type**: `float`
-- **Range**: `0.0` to `1.0`
-- **Default**: `0.0`
-- **Description**: Controls the randomness of the transcription. Lower values make the output more deterministic.
+* All API calls and responses (including errors) are logged to emLogs.
+* Logs include project ID, tokens used, and response payload.
 
-### Max Tokens
-- **Key**: `max_tokens`
-- **Type**: `int`
-- **Default**: None (No maximum unless specified)
-- **Description**: Specifies the maximum number of tokens to generate in the transcription.
+---
 
-### Format
-- **Key**: `format`
-- **Type**: `string`
-- **Example**: `"json"`, `"text"`, `"srt"`
-- **Default**: `"json"`
-- **Description**: Specifies the format of the transcription output.
+## Adding New Models
 
-### Temperature Increment On Fallback
-- **Key**: `temperature_increment_on_fallback`
-- **Type**: `float`
-- **Range**: `0.0` to `1.0`
-- **Default**: Not specified (Rarely used)
+1. Add API config in the EM settings (alias, model ID, endpoint, etc).
+2. If model requires special param filtering, add to `filterDefaultParamsForModel()`.
+3. If response structure differs, update `normalizeResponse()`.
 
-### Compression Ratio Threshold
-- **Key**: `compression_ratio_threshold`
-- **Type**: `float`
-- **Example**: `2.4`
-- **Default**: None (Optional)
+---
 
-### Log Prob Threshold
-- **Key**: `log_prob_threshold`
-- **Type**: `float`
-- **Example**: `-1.0`
-- **Default**: None (Optional)
+## Requirements
 
-### No Speech Threshold
-- **Key**: `no_speech_threshold`
-- **Type**: `float`
-- **Range**: `0.0` to `1.0`
-- **Default**: `0.6`
-- **Description**: If the probability of silence/noise is higher than this threshold, the segment is ignored.
+* REDCap 14+ (recommended)
+* VPN connection to Stanford SOM/SHC
+* Proper API credentials for each model endpoint
 
-### Condition On Previous Text
-- **Key**: `condition_on_previous_text`
-- **Type**: `boolean`
-- **Default**: `true`
-- **Description**: Whether the model should condition on the previous output when generating the next segment of transcription.
+---
+
+## FAQ / Troubleshooting
+
+* **Getting 400 errors?**
+  Only supported params are sent for each model. If you see this, check your input or EM config.
+* **Want to use a new model?**
+  Add it in settings and test with the built-in Unit Test page.
+
+---
+
+**For more details, see the code and the `tests.php` unit test UI.**

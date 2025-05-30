@@ -26,7 +26,7 @@ abstract class BaseModelRequest implements ModelInterface {
         $this->modelId = $modelConfig['model_id'];
         $this->auth_key_name = $modelConfig['api_key_var'];
         $this->defaultParams = $defaultParams;
-        $this->$model = $model;
+        $this->model = $model;
     }
 
     public function validateParams(array $params): void {
@@ -66,11 +66,12 @@ abstract class BaseModelRequest implements ModelInterface {
     /**
      * @throws Exception
      */
-    public function executeAPICall(string $apiEndpoint, string|array $params): array {
+    public function executeAPICall(string $apiEndpoint, string|array $params, array $headers = null): string {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $apiEndpoint);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $this->headers);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers ?? $this->headers);
+
         //TODO INcorporate per model timeout??
         curl_setopt($ch, CURLOPT_TIMEOUT, 500);
         curl_setopt($ch, CURLOPT_POST, true);
@@ -96,11 +97,7 @@ abstract class BaseModelRequest implements ModelInterface {
 
         curl_close($ch);
 
-        $decodedResponse = json_decode($response, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new Exception("JSON decode error: " . json_last_error_msg());
-        }
-        return $decodedResponse;
+        return $response;
     }
     public static function normalizeResponse(array $response): array {
         return $response; // Override in subclasses as needed

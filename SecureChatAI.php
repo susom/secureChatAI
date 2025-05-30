@@ -4,10 +4,13 @@ namespace Stanford\SecureChatAI;
 
 require_once "emLoggerTrait.php";
 require_once "classes/SecureChatLog.php";
-require_once "classes/Models/ModelInterface.php"; // ✅ Ensure interface is loaded first
+require_once "classes/Models/ModelInterface.php";
 require_once "classes/Models/BaseModelRequest.php";
 require_once "classes/Models/GPTModelRequest.php";
 require_once "classes/Models/WhisperModelRequest.php";
+require_once "classes/Models/GeminiModelRequest.php";
+require_once "classes/Models/ClaudeModelRequest.php";
+require_once "classes/Models/GenericModelRequest.php";
 
 use Google\Exception;
 use GuzzleHttp\Client;
@@ -35,7 +38,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'frequency_penalty' => (float)$this->getSystemSetting('gpt-frequency-penalty') ?: 0.5,
             'presence_penalty' => (float)$this->getSystemSetting('gpt-presence-penalty') ?: 0,
             'max_tokens' => (int)$this->getSystemSetting('gpt-max-tokens') ?: 800,
-            'reasoning_effort' => $this->getSystemSetting('reasoning-effort') ,
+            'reasoning_effort' => $this->getSystemSetting('reasoning-effort'),
             'stop' => null,
             'model' => 'gpt-4o'
         ];
@@ -52,7 +55,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'required' => $setting['api-input-var'],
                 'model_id' => $modelID
             ];
-
             if (isset($setting['default-model']) && $setting['default-model']) {
                 $this->defaultParams['model'] = $modelAlias;
             }
@@ -70,30 +72,53 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return SecureChatLog::getAllLogs($this, $offset);
     }
 
+    private function filterDefaultParamsForModel($model, $params)
+    {
+        $filtered = $this->defaultParams;
+
+        // Only o1/o3-mini get reasoning_effort
+        if (!in_array($model, ['o1', 'o3-mini'])) {
+            unset($filtered['reasoning_effort'], $params['reasoning_effort']);
+        }
+
+        // Only models supporting json_schema
+        $schemaModels = ['gpt-4.1', 'o1', 'o3-mini', 'llama3370b'];
+        if (!in_array($model, $schemaModels)) {
+            unset($params['json_schema']);
+        }
+
+        // o1/o3-mini have strict param set
+        if (in_array($model, ['o1', 'o3-mini'])) {
+            $merged = [
+                'model' => $model,
+                'messages' => $params['messages'] ?? [],
+                'max_completion_tokens' => $params['max_completion_tokens'] ?? ($params['max_tokens'] ?? 800),
+            ];
+            if (isset($params['reasoning_effort'])) {
+                $merged['reasoning_effort'] = $params['reasoning_effort'];
+            }
+            return $merged;
+        }
+
+        unset($filtered['max_tokens'], $params['max_tokens']);
+        return array_merge($filtered, $params);
+    }
 
     public function callAI($model, $params = [], $project_id = null)
     {
-        $retries = 2; // Maximum number of retries
+        $retries = 2;
         $attempt = 0;
 
         while ($attempt <= $retries) {
             try {
-                // Ensure the secure chat AI is initialized
                 $this->initSecureChatAI();
-                // $this->emDebug("Initialized SecureChatAI with model", $model);
 
-                // Check if model is supported
                 if (!isset($this->modelConfig[$model])) {
                     throw new Exception('Unsupported model: ' . $model);
                 }
 
                 $modelConfig = $this->modelConfig[$model];
-                // $this->emDebug("Loaded model configuration", $modelConfig);
-
                 $api_endpoint = $modelConfig['api_url'];
-                $auth_key_name = $modelConfig['api_key_var'];
-                $api_key = $modelConfig['api_token'];
-                $model_id = $modelConfig['model_id'];
                 $headers = [];
 
                 // Ensure required parameters are provided
@@ -103,51 +128,41 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     }
                 }
 
-                // Prepare request headers, URL, and payload based on model type
                 switch ($model) {
-                    // OLD WAY WHERE key APPENDED TO QueryString
                     case 'gpt-4o':
                     case 'ada-002':
-                    case 'o1': // FINAL pattern
-                    case 'o3-mini': // FINAL pattern
                         $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams, $model);
                         $responseData = $gpt->sendRequest($api_endpoint, $params);
                         break;
-
-                    // SPECIAL CASE FOR WHISPER
                     case 'whisper':
                         $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams, $model);
-
-                        //Whisper model structure operates independently, set Auth key manually
+                        $whisper->setHeaders(['Content-Type: multipart/form-data','Accept: application/json']);
                         $whisper->setAuthKeyName($modelConfig['whisper']['api_key_var'] ?? 'api-key');
                         $responseData = $whisper->sendRequest($api_endpoint, $params);
                         break;
-
-
-                    case 'llama3370b': // Meta - FINAL pattern
-                        $llama = new MetaModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $llama->sendRequest($api_endpoint, $params);
+                    case 'gpt-4.1':
+                    case 'o1':
+                    case 'o3-mini':
+                    case 'llama3370b':
+                    case 'llama-Maverick':
+                        $generic = new GenericModelRequest($this, $modelConfig, $this->filterDefaultParamsForModel($model, $params), $model);
+                        $responseData = $generic->sendRequest($api_endpoint, $params);
                         break;
-
-                    // same "FINAL" PATTERN BUT SLIGHTY DIFFERENT FOR CLAUDE
                     case 'claude':
-                        $this->prepareClaudeRequest($params, $headers, $api_key, $model_id, $postfields);
+                        $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                        $responseData = $claude->sendRequest($api_endpoint, $params);
                         break;
-
-                    // WILDLY DIFFERENT PATTERN FOR GEMINI
-                    case "gemini15pro":
-                        $this->prepareGeminiRequest($params, $headers, $api_key, $model, $postfields);
+                    case 'gemini20flash':
+                        $gemini = new GeminiModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                        $responseData = $gemini->sendRequest($api_endpoint, $params);
                         break;
-
                     default:
                         throw new Exception("Unsupported model configuration for: $model");
                 }
+                
 
-                // Execute the API call
-//                $responseData = $this->executeApiCall($api_endpoint, $headers, $postfields ?? []);
                 $normalizedResponse = $this->normalizeResponse($responseData, $model);
 
-                // Log interaction only if project_id is available
                 if ($project_id) {
                     $this->logInteraction($project_id, $params, $responseData);
                 }
@@ -162,132 +177,22 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         'error' => true,
                         'message' => "Error after $retries retries: " . $e->getMessage()
                     ];
-
-                    // Log error interaction only if project_id is available
                     if ($project_id) {
                         $this->logErrorInteraction($project_id, $params, $error);
                     } else {
                         $this->emDebug("Skipping error logging due to missing project ID (pid).");
                     }
-
                     return $error;
                 }
             }
         }
     }
 
-    private function formatMessagesForClaude(array $messages): string
-    {
-        $formatted = [];
-        foreach ($messages as $message) {
-            $role = ucfirst($message['role']);
-            $content = trim($message['content']);
-            $formatted[] = "{$role}: {$content}";
-        }
-        return implode("\n\n", $formatted); // Separate messages with double newlines for clarity
-    }
-
-    private function prepareClaudeRequest(&$params, &$headers, $api_key, $model_id, &$postfields)
-    {
-        $auth_key_name = $this->modelConfig['claude']['api_key_var'];
-        $headers = ['Content-Type: application/json', "$auth_key_name: $api_key"];
-
-        // Format messages using existing helper
-        $prompt_text = isset($params['messages'])
-            ? $this->formatMessagesForClaude($params['messages'])
-            : ($params['prompt_text'] ?? '');
-
-        if (empty($prompt_text)) {
-            throw new Exception('Claude API requires prompt_text in the request body.');
-        }
-
-        // only Claude-supported keys
-        $parameters = [
-            "temperature" => $this->defaultParams['temperature'],
-            "top_p" => $this->defaultParams['top_p'],
-            "max_tokens" => $this->defaultParams['max_tokens']
-        ];
-
-        $postfields = json_encode([
-            "model_id" => $model_id,  // ✅ Keeps Claude’s expected `model_id`
-            "prompt_text" => $prompt_text, // ✅ Keeps Claude’s expected `prompt_text`
-            "parameters" => $parameters // ✅ Adds tuning options without breaking Claude
-        ]);
-    }
-
-    private function prepareGeminiRequest(&$params, &$headers, $api_key, $model, &$postfields)
-    {
-        $auth_key_name = $this->modelConfig[$model]['api_key_var'] ;
-        $headers = [
-            'Content-Type: application/json',
-            "$auth_key_name: $api_key"
-        ];
-
-        $messages = $params['messages'] ?? [];
-        $geminiMessages = [];
-        $systemContext = "";
-
-        // Process messages to convert "system" role
-        foreach ($messages as $msg) {
-            if ($msg["role"] === "system") {
-                // Collect system messages as context
-                $systemContext .= trim($msg["content"]) . "\n\n";
-            } else {
-                // Convert normal messages
-                $geminiMessages[] = [
-                    "role" => $msg["role"],
-                    "parts" => [["text" => trim($msg["content"])]]
-                ];
-            }
-        }
-
-        // If system context exists, inject it into the first user message
-        if (!empty($systemContext)) {
-            if (!empty($geminiMessages) && $geminiMessages[0]["role"] === "user") {
-                // Prepend system context to first user message
-                $geminiMessages[0]["parts"][0]["text"] = $systemContext . $geminiMessages[0]["parts"][0]["text"];
-            } else {
-                // Otherwise, create a new user message for system context
-                array_unshift($geminiMessages, [
-                    "role" => "user",
-                    "parts" => [["text" => $systemContext]]
-                ]);
-            }
-        }
-
-        // Define generation config
-        $generationConfig = [
-            "temperature" => $this->defaultParams['temperature'],
-            "topP" => $this->defaultParams['top_p'],
-            "max_output_tokens" => $this->defaultParams['max_tokens'],
-            "stop_sequences" => $this->defaultParams['stop'] ?? null, // Stop sequences if provided
-            "frequency_penalty" => $this->defaultParams['frequency_penalty'],
-            "presence_penalty" => $this->defaultParams['presence_penalty'],
-        ];
-
-        // Optional safety settings (can be adjusted)
-        $safetySettings = [
-            [
-                "category" => "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold" => "BLOCK_LOW_AND_ABOVE"
-            ]
-        ];
-
-        $postfields = json_encode([
-            "contents" => $geminiMessages,
-            "generation_config" => $generationConfig,
-            "safety_settings" => $safetySettings
-        ]);
-    }
-
     private function normalizeResponse($response, $model)
     {
-        // $this->emDebug("API responseData for normalizeResponse", $model, $response);
-
         $normalized = [];
 
         if ($model === 'claude') {
-            // Extract content from Claude response
             $normalized['content'] = $response['content'][0]['text'] ?? '';
             $normalized['role'] = $response['role'] ?? 'assistant';
             $normalized['model'] = $response['model'] ?? 'claude';
@@ -296,8 +201,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'completion_tokens' => $response['usage']['output_tokens'] ?? 0,
                 'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
             ];
-        } elseif (in_array($model, ['o1', 'o3-mini', "gpt-4o", "llama3370b"])) {
-            // Extract content from o1 and o3-mini responses
+        } elseif (in_array($model, [
+            'o1', 'o3-mini', 'gpt-4o', 'llama3370b', 'gpt-4.1', 'llama-Maverick'
+        ])) {
             $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
             $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';
             $normalized['model'] = $response['model'] ?? $model;
@@ -306,26 +212,20 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
                 'total_tokens' => $response['usage']['total_tokens'] ?? 0
             ];
-        } elseif ($model === 'gemini15pro') {
-            // Collect all text parts across multiple candidates
+        } elseif ($model === 'gemini20flash') {
             $contentParts = [];
-            foreach ($response as $resp) {
-                if (!empty($resp['candidates'][0]['content']['parts'])) {
-                    foreach ($resp['candidates'][0]['content']['parts'] as $part) {
-                        if (!empty($part['text'])) {
-                            $contentParts[] = $part['text'];
-                        }
+            foreach ($response as $chunk) {
+                $parts = $chunk['candidates'][0]['content']['parts'] ?? [];
+                foreach ($parts as $part) {
+                    if (!empty($part['text'])) {
+                        $contentParts[] = $part['text'];
                     }
                 }
             }
-
-            // Join all content pieces into one response
             $normalized['content'] = implode(" ", $contentParts);
-
-            $normalized['role'] = "assistant";
+            $normalized['role'] = $response[0]['candidates'][0]['content']['role'] ?? "model";
             $normalized['model'] = $response[0]['modelVersion'] ?? $model;
 
-            // Extract token usage from the last response chunk (assuming it's in the last index)
             $usage = end($response)['usageMetadata'] ?? [];
             $normalized['usage'] = [
                 'prompt_tokens' => $usage['promptTokenCount'] ?? 0,
@@ -333,65 +233,16 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'total_tokens' => $usage['totalTokenCount'] ?? 0
             ];
         } else {
-            // If the model isn't specified, pass through as-is
             $normalized = $response;
         }
 
+        $this->emDebug("normalized responseData", $normalized);
         return $normalized;
     }
 
-    private function executeApiCall($api_endpoint, $headers, $postfields)
-    {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $api_endpoint);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        curl_setopt($ch, CURLOPT_POST, true);
-
-        // Handle multipart form-data or JSON
-        if (is_array($postfields)) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $postfields);
-        } else {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $postfields);
-        }
-
-        // Temporary manual DNS resolution
-        // TODO: Remove this block once proper DNS resolution is restored
-        curl_setopt($ch, CURLOPT_RESOLVE, [
-            'apim.stanfordhealthcare.org:443:10.249.134.5',
-            'som-redcap-whisper.openai.azure.com:443:10.153.192.4',
-            'som-redcap.openai.azure.com:443:10.249.50.7'
-        ]);
-
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-        if (curl_errno($ch)) {
-            throw new Exception('cURL error: ' . curl_error($ch));
-        }
-
-        if ($http_code < 200 || $http_code >= 300) {
-            throw new Exception('HTTP error: ' . $http_code . ' - Response: ' . $response);
-        }
-
-        curl_close($ch);
-
-        if (is_array($response)) {
-            return $response;
-        }
-
-        $decodedResponse = json_decode($response, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new Exception("JSON decode error: " . json_last_error_msg());
-        }
-        return $decodedResponse;
-    }
-
-
     private function logInteraction($project_id, $requestData, $responseData)
     {
-        $payload = array_merge($requestData, $responseData);
+        $payload = array_merge($requestData, $responseData ?? []);
         $payload['project_id'] = $project_id;
         $action = new SecureChatLog($this);
 
@@ -411,10 +262,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $action->save();
     }
 
-
     public function extractResponseText($response)
     {
-        // Extract `content` from normalized response
         return $response['content'] ?? json_encode($response);
     }
 
@@ -433,7 +282,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'usage' => $response['usage'] ?? 'N/A'
         ];
     }
-
 
     public function getGuzzleClient()
     {

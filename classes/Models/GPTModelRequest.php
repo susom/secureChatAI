@@ -14,14 +14,16 @@ class GPTModelRequest extends BaseModelRequest {
      */
     public function sendRequest(string $apiEndpoint, array $params): array
     {
-        if($this->model === "gpt-4o" || $this->model === "ada-002") { //Old model types have different configuration parameters
-            $requestData = $this->prepareOldRequestData($params);
-            $apiEndpoint = $this->appendAuthKey($apiEndpoint);
-        } else { // o1 , Mini
-            $requestData = $this->prepareNewRequestData($params);
+        $apiEndpoint = $this->appendAuthKey($apiEndpoint);
+        $requestData = $this->prepareRequestData($params);
+        $response = $this->executeApiCall($apiEndpoint, $requestData);
+
+        $decoded = json_decode($response, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \Exception("JSON decode error in GPTModelRequest: " . json_last_error_msg());
         }
 
-        return $this->executeApiCall($apiEndpoint, $requestData);
+        return $decoded;
     }
 
     /**
@@ -42,34 +44,10 @@ class GPTModelRequest extends BaseModelRequest {
      * @param array $params The request parameters.
      * @return string JSON-encoded request data.
      */
-    private function prepareOldRequestData(array $params): string
+    private function prepareRequestData(array $params): string
     {
         $mergedParams = array_merge($this->defaultParams, $params);
-
-        // Manually removing default param, breaks regular gpt calls
-        unset($mergedParams["reasoning_effort"]);
+        unset($mergedParams["reasoning_effort"]); // Remove unsupported key for GPT-4o
         return json_encode($mergedParams) ?: '[]';
-    }
-
-    /**
-     * Sets new parameters based on new API spec o1 , o3-mini
-     * @param array $params The request parameters.
-     * @return string JSON-encoded request data.
-     */
-    private function prepareNewRequestData(array $params): string
-    {
-        // Grab required embedded strings
-        $auth_key_name = $this->auth_key_name;
-        $api_key = $this->apiKey;
-
-        // Set headers explicit to llama / o1 / 03-mini
-        $this->setHeaders(['Content-Type: application/json', "$auth_key_name: $api_key"]);
-
-        //Set other required fields for request
-        $params['model'] = $this->model;
-        $params['messages'] = !empty($params['messages']) ?? [];
-        $params['max_completion_tokens'] = $this->defaultParams['max_tokens'];
-        $params['reasoning_effort'] = $params['reasoning_effort'] ?? $this->defaultParams['reasoning_effort'];
-        return json_encode($params);
     }
 }
