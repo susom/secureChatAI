@@ -3,6 +3,10 @@ namespace Stanford\SecureChatAI;
 
 class GenericModelRequest extends BaseModelRequest
 {
+    public function __construct($module, array $modelConfig, array $defaultParams, string $model) {
+        parent::__construct($module, $modelConfig, $defaultParams, $model);
+    }
+    
     public function sendRequest(string $apiEndpoint, array $params): array
     {
         $mergedParams = array_merge($this->defaultParams, $params);
