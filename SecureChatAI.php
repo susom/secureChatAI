@@ -11,6 +11,7 @@ require_once "classes/Models/WhisperModelRequest.php";
 require_once "classes/Models/GeminiModelRequest.php";
 require_once "classes/Models/ClaudeModelRequest.php";
 require_once "classes/Models/GenericModelRequest.php";
+require_once "classes/Models/GPT4oMiniTTSModelRequest.php";
 
 use Google\Exception;
 use GuzzleHttp\Client;
@@ -159,8 +160,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         $responseData = $claude->sendRequest($api_endpoint, $params);
                         break;
                     case 'gemini20flash':
+                    case 'gemini25pro':
                         $gemini = new GeminiModelRequest($this, $modelConfig, $this->defaultParams, $model);
                         $responseData = $gemini->sendRequest($api_endpoint, $params);
+                        break;
+                    case 'gpt-4o-tts':
+                    case 'tts':
+                        $tts = new GPT4oMiniTTSModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                        $responseData = $tts->sendRequest($api_endpoint, $params);
                         break;
                     default:
                         throw new Exception("Unsupported model configuration for: $model");
@@ -218,7 +225,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
                 'total_tokens' => $response['usage']['total_tokens'] ?? 0
             ];
-        } elseif ($model === 'gemini20flash') {
+        } elseif (in_array($model, [
+             'gemini20flash',  'gemini25pro'
+        ])) {
             $contentParts = [];
             foreach ($response as $chunk) {
                 $parts = $chunk['candidates'][0]['content']['parts'] ?? [];
@@ -238,6 +247,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'completion_tokens' => $usage['candidatesTokenCount'] ?? 0,
                 'total_tokens' => $usage['totalTokenCount'] ?? 0
             ];
+        } elseif ($model === 'gpt-4o-tts' || $model === 'tts') {
+            // Example: Your TTSModelRequest returns audio_base64 and content_type fields.
+            $normalized['audio_base64'] = $response['audio_base64'] ?? '';
+            $normalized['content_type'] = $response['content_type'] ?? 'audio/mpeg';
+            $normalized['model'] = $model;
+            // Add any other relevant info
         } else {
             $normalized = $response;
         }
