@@ -14,7 +14,7 @@ $configProp = $reflect->getProperty('modelConfig');
 $configProp->setAccessible(true);
 $modelConfig = $configProp->getValue($module);
 
-$skip = [];//['gpt-4o', 'ada-002', 'whisper', 'llama3370b', 'gpt-4.1', 'claude', 'gemini20flash', 'o1', 'o3-mini', 'llama-Maverick'];
+$skip = [];//['gpt-4o', 'ada-002', 'whisper', 'llama3370b', 'gpt-4.1', 'claude', 'gemini20flash', 'o1', 'o3-mini', 'llama-Maverick',"gemini25pro","gpt-4o-tts"];
 
 $rows = '';
 foreach ($modelConfig as $alias => $config) {
@@ -36,6 +36,12 @@ foreach ($modelConfig as $alias => $config) {
                 'file' => $filePath,
                 'language' => 'en',
                 'response_format' => 'json'
+            ];
+        } elseif ($alias === 'gpt-4o-tts' || $alias === 'tts') {
+            // Pass a text prompt for TTS
+            $params = [
+                'input' => "Say hi from $alias"
+                // Or whatever field your TTSModelRequest expects
             ];
         } elseif ($alias === 'ada-002') {
             $params['input'] = "Say hi from $alias";
@@ -77,6 +83,19 @@ foreach ($modelConfig as $alias => $config) {
             $statusClass = "success";
         }
 
+
+        // Try to decode and display audio if audio_base64 exists and is non-empty
+        $audioPlayer = '';
+        if (is_string($output)) {
+            $outputArr = json_decode($output, true);
+            if (
+                is_array($outputArr) &&
+                !empty($outputArr['audio_base64'])
+            ) {
+                $audioSrc = "data:audio/mpeg;base64," . $outputArr['audio_base64'];
+                $audioPlayer = "<audio controls src=\"$audioSrc\" style=\"max-width:200px;\"></audio>";
+            }
+        }
     } catch (\Exception $e) {
         $output = htmlentities($e->getMessage());
     }
@@ -84,7 +103,10 @@ foreach ($modelConfig as $alias => $config) {
     $rows .= "<tr>
         <td>$alias</td>
         <td class=\"$statusClass\">$status</td>
-        <td><pre>" . htmlentities($output) . "</pre></td>
+        <td>
+        <pre>" . htmlentities($output) . "</pre>
+            $audioPlayer
+        </td>
       </tr>";
 }
 
