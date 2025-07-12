@@ -12,8 +12,7 @@ class WhisperModelRequest extends BaseModelRequest
      * @return array The API response.
      * @throws \Exception If the request fails.
      */
-    public function sendRequest(string $apiEndpoint, array $params): array
-    {
+    public function sendRequest(string $apiEndpoint, array $params): array {
         $apiEndpoint = $this->appendAuthKey($apiEndpoint);
         $requestData = $this->prepareRequestData($params);
 
@@ -34,6 +33,7 @@ class WhisperModelRequest extends BaseModelRequest
 
         return $decoded;
     }
+    
 
     private function appendAuthKey(string $apiEndpoint): string
     {

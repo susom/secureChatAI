@@ -14,7 +14,7 @@ class GenericModelRequest extends BaseModelRequest
 
         // Handle json_schema wrapping if present
         if (isset($mergedParams['json_schema'])) {
-            $mergedParams['response_format'] = [
+            $mergedParams['format'] = [
                 'type' => 'json_schema',
                 'json_schema' => $mergedParams['json_schema']
             ];
@@ -22,7 +22,6 @@ class GenericModelRequest extends BaseModelRequest
         }
 
         $postfields = json_encode($mergedParams);
-
 
         // Dynamically decide if the key should be in header or query string
         $keyHeaderName = $this->auth_key_name;
