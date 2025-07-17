@@ -75,11 +75,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     private function filterDefaultParamsForModel($model, $params)
     {
-        // Merge first so $params values override defaults
         $merged = array_merge($this->defaultParams, $params);
 
-        // Only o1/o3-mini get reasoning_effort
+        // Only o1/o3-mini get reasoning params
         if (!in_array($model, ['o1', 'o3-mini'])) {
+            unset($merged['reasoning']);
             unset($merged['reasoning_effort']);
         }
 
@@ -110,6 +110,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
 
 
+
     public function callAI($model, $params = [], $project_id = null)
     {
         $retries = 2;
@@ -134,11 +135,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     }
                 }
 
+                // Filter params for every model
+                $filteredParams = $this->filterDefaultParamsForModel($model, $params);
+
                 switch ($model) {
                     case 'gpt-4o':
                     case 'ada-002':
                         $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $responseData = $gpt->sendRequest($api_endpoint, $params);
+                        $responseData = $gpt->sendRequest($api_endpoint, $filteredParams);
                         break;
                     case 'whisper':
                         $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams, $model);
@@ -157,12 +161,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         break;
                     case 'claude':
                         $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $responseData = $claude->sendRequest($api_endpoint, $params);
+                        $responseData = $claude->sendRequest($api_endpoint, $filteredParams);
                         break;
                     case 'gemini20flash':
                     case 'gemini25pro':
                         $gemini = new GeminiModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $responseData = $gemini->sendRequest($api_endpoint, $params);
+                        $responseData = $gemini->sendRequest($api_endpoint, $filteredParams);
                         break;
                     case 'gpt-4o-tts':
                     case 'tts':
