@@ -45,6 +45,11 @@ foreach ($modelConfig as $alias => $config) {
             ];
         } elseif ($alias === 'ada-002') {
             $params['input'] = "Say hi from $alias";
+        } elseif ($alias === 'deepseek') {
+            // DeepSeek expects OpenAI-style chat payload
+            $params['messages'] = [
+                ["role" => "user", "content" => "Say hi from $alias"]
+            ];
         } elseif (stripos($alias, 'gemini') !== false) {
             $params['messages'] = [
                 ["role" => "user", "content" => "Say hi from $alias"]
