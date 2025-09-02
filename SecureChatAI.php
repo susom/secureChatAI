@@ -144,6 +144,10 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams, $model);
                         $responseData = $gpt->sendRequest($api_endpoint, $filteredParams);
                         break;
+                    case 'deepseek':
+                        $generic = new GenericModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                        $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
+                        break;
                     case 'whisper':
                         $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams, $model);
                         $whisper->setHeaders(['Content-Type: multipart/form-data','Accept: application/json']);
@@ -219,7 +223,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
             ];
         } elseif (in_array($model, [
-            'o1', 'o3-mini', 'gpt-4o', 'llama3370b', 'gpt-4.1', 'llama-Maverick'
+            'o1', 'o3-mini', 'gpt-4o', 'llama3370b', 'gpt-4.1', 'llama-Maverick', 'deepseek'
         ])) {
             $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
             $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';

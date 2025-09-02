@@ -33,7 +33,7 @@
                 "show-header-and-footer": false
             },
             {
-                "name": "SecureChatAI AI Model Unit Tests",
+                "name": "SecureChatAI AI Model Smoke Tests",
                 "icon": "fa-solid fa-gear",
                 "url": "pages/tests.php",
                 "show-header-and-footer": false
