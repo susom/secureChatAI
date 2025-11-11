@@ -141,6 +141,54 @@ See **EM configuration** for full list and defaults.
 
 ---
 
+## Module API Endpoint
+
+SecureChatAI now exposes a **REDCap External Module API endpoint** for external services (like RAG pipelines) to securely call Stanford-approved AI models.
+
+This allows backend scripts, CRON jobs, or cloud services (e.g., Cloud Run, App Engine) to submit prompts through SecureChatAI using a REDCap API token — without needing direct model keys or VPN routing.
+
+### Example: cURL Request
+
+```bash
+curl -X POST "https://redcap.stanford.edu/api/" \
+  -F "token=YOUR_API_TOKEN" \
+  -F "content=externalModule" \
+  -F "prefix=secure_chat_ai" \
+  -F "action=callAI" \
+  -F "prompt=Summarize this text about RAG pipelines" \
+  -F "model=deepseek" \
+  -F "format=json" \
+  -F "returnFormat=json"
+```
+
+### Example Response
+
+```json
+{
+  "status": "success",
+  "model": "deepseek",
+  "content": "RAG pipelines combine retrieval and generation...",
+  "usage": {
+    "prompt_tokens": 42,
+    "completion_tokens": 178,
+    "total_tokens": 220
+  }
+}
+```
+
+### API Notes
+
+- **Requires**: A valid REDCap API token from a project where SecureChatAI EM is enabled.  
+  → Typically, this is a *dummy “service project”* created specifically for SecureChatAI.
+- **Access Control**: All requests must include a valid token unless explicitly marked `no-auth` in config.
+- **Supported Action**:  
+  `callAI` — invokes any SecureChatAI-supported model (DeepSeek, GPT-4o, Gemini, Claude, etc.)
+- **Format Support**: JSON (recommended), XML, CSV.
+- **Recommended Use Case**: Backend integrations like RAG pipelines, cron-based summarization, or ingestion workers.
+
+
+---
+
 ## FAQ / Troubleshooting
 
 * **Getting 400 errors?**

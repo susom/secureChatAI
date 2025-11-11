@@ -108,9 +108,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return $merged;
     }
 
-
-
-
     public function callAI($model, $params = [], $project_id = null)
     {
         $retries = 2;
@@ -332,6 +329,73 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     public function getGuzzleTimeout(): float
     {
         return $this->guzzleTimeout;
+    }
+
+    /**
+     * This is the primary ajax handler for JSMO calls
+     * @param $action
+     * @param $payload
+     * @param $project_id
+     * @return array|array[]|bool
+     * @throws Exception
+     */
+
+    public function redcap_module_api($action = null, $payload = [])
+    {
+        if (empty($action) && isset($_POST['action'])) {
+            $action = $_POST['action'];
+        }
+
+        // Normalize payload from JSON or POST
+        if (empty($payload)) {
+            $raw = file_get_contents("php://input");
+            $decoded = $raw ? json_decode($raw, true) : [];
+            $payload = (json_last_error() === JSON_ERROR_NONE) ? $decoded : $_POST;
+        }
+
+        switch ($action) {
+            case "callAI":
+                $prompt = $payload['prompt'] ?? null;
+                $model = $payload['model'] ?? 'deepseek';
+                $temperature = isset($payload['temperature']) ? (float)$payload['temperature'] : 0.2;
+                $max_tokens = isset($payload['max_tokens']) ? (int)$payload['max_tokens'] : 800;
+
+                if (!$prompt) {
+                    return [
+                        "status"  => 400,
+                        "body"    => json_encode(["error" => "Missing prompt"]),
+                        "headers" => ["Content-Type" => "application/json"]
+                    ];
+                }
+
+                $params = [
+                    'messages' => [['role' => 'user', 'content' => $prompt]],
+                    'temperature' => $temperature,
+                    'max_tokens' => $max_tokens
+                ];
+
+                $result = $this->callAI($model, $params);
+
+                $response = [
+                    'status' => 'success',
+                    'model' => $model,
+                    'content' => $this->extractResponseText($result),
+                    'usage' => $this->extractUsageTokens($result)
+                ];
+
+                return [
+                    "status"  => 200,
+                    "body"    => json_encode($response),
+                    "headers" => ["Content-Type" => "application/json"]
+                ];
+
+            default:
+                return [
+                    "status"  => 400,
+                    "body"    => json_encode(["error" => "Action $action not defined"]),
+                    "headers" => ["Content-Type" => "application/json"]
+                ];
+        }
     }
 }
 ?>

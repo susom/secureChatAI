@@ -41,6 +41,14 @@
         ]
     },
     "no-auth-pages": [],
+    
+    "api-actions": {
+        "callAI": {
+            "description": "Proxy AI calls (DeepSeek, GPT, etc.) for external pipelines",
+            "access": ["auth"]
+        }
+    },
+    
     "system-settings": [
         {
             "key": "api-settings",
