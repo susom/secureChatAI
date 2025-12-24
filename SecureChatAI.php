@@ -108,6 +108,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return $merged;
     }
 
+
+
+
     public function callAI($model, $params = [], $project_id = null)
     {
         $retries = 2;
@@ -115,77 +118,21 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         while ($attempt <= $retries) {
             try {
-                $this->initSecureChatAI();
+                // --- Agent Mode Gate ---
+                $agent_mode_requested = !empty($params['agent_mode']);
+                $agent_mode_enabled = (bool) $this->getSystemSetting('enable_agent_mode');
 
-                if (!isset($this->modelConfig[$model])) {
-                    throw new Exception('Unsupported model: ' . $model);
+                if ($agent_mode_requested && $agent_mode_enabled) {
+                    return $this->runAgentLoop(
+                        model: $model,
+                        params: $params,
+                        project_id: $project_id
+                    );
                 }
 
-                $modelConfig = $this->modelConfig[$model];
-                $api_endpoint = $modelConfig['api_url'];
-                $headers = [];
+                // Normal single-call path
+                return $this->callLLMOnce($model, $params, $project_id);
 
-                // Ensure required parameters are provided
-                foreach ($modelConfig['required'] as $param) {
-                    if (empty($params[$param])) {
-                        throw new Exception('Missing required parameter: ' . $param);
-                    }
-                }
-
-                // Filter params for every model
-                $filteredParams = $this->filterDefaultParamsForModel($model, $params);
-
-                switch ($model) {
-                    case 'gpt-4o':
-                    case 'ada-002':
-                        $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $responseData = $gpt->sendRequest($api_endpoint, $filteredParams);
-                        break;
-                    case 'deepseek':
-                        $generic = new GenericModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
-                        break;
-                    case 'whisper':
-                        $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $whisper->setHeaders(['Content-Type: multipart/form-data','Accept: application/json']);
-                        $whisper->setAuthKeyName($modelConfig['whisper']['api_key_var'] ?? 'api-key');
-                        $responseData = $whisper->sendRequest($api_endpoint, $params);
-                        break;
-                    case 'gpt-4.1':
-                    case 'o1':
-                    case 'o3-mini':
-                    case 'llama3370b':
-                    case 'llama-Maverick':
-                        $filteredParams = $this->filterDefaultParamsForModel($model, $params);
-                        $generic = new GenericModelRequest($this, $modelConfig, [], $model); // just leave defaultParams empty or as truly static defaults
-                        $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
-                        break;
-                    case 'claude':
-                        $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $responseData = $claude->sendRequest($api_endpoint, $filteredParams);
-                        break;
-                    case 'gemini20flash':
-                    case 'gemini25pro':
-                        $gemini = new GeminiModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $responseData = $gemini->sendRequest($api_endpoint, $filteredParams);
-                        break;
-                    case 'gpt-4o-tts':
-                    case 'tts':
-                        $tts = new GPT4oMiniTTSModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                        $responseData = $tts->sendRequest($api_endpoint, $params);
-                        break;
-                    default:
-                        throw new Exception("Unsupported model configuration for: $model");
-                }
-                
-
-                $normalizedResponse = $this->normalizeResponse($responseData, $model);
-
-                if ($project_id) {
-                    $this->logInteraction($project_id, $params, $responseData);
-                }
-
-                return $normalizedResponse;
             } catch (\Exception $e) {
                 $attempt++;
                 $this->emDebug("Attempt $attempt: Error", $e->getMessage());
@@ -204,7 +151,398 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 }
             }
         }
+
+        return ['error' => true, 'message' => 'Unknown error'];
     }
+
+    private function loadToolsForProject(?int $pid): array
+    {
+        if (empty($pid)) return [];
+
+        $json = $this->getSystemSetting('agent_tool_registry');
+        if (empty($json)) return [];
+
+        $registry = json_decode($json, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($registry)) {
+            $this->emError("Invalid agent_tool_registry JSON");
+            return [];
+        }
+
+        $tools = $registry[(string)$pid] ?? $registry[$pid] ?? [];
+        return is_array($tools) ? $tools : [];
+    }
+
+    private function getAgentRouterPrompt(): string
+    {
+        $prompt = (string) ($this->getSystemSetting('agent_router_system_prompt') ?? '');
+        if (!empty(trim($prompt))) return $prompt;
+
+        // Safe default if not configured yet
+        return implode("\n", [
+            "You are the REDCap Agent Router.",
+            "Your job:",
+            "- Interpret user intent.",
+            "- Decide if a tool is required.",
+            "- Choose the correct tool(s) and provide a tool_call in strict JSON.",
+            "- Ask for missing required parameters instead of guessing.",
+            "- Never invent tool names or arguments.",
+            "",
+            "Output one of:",
+            "1) A tool_call JSON object",
+            "2) A clarification question",
+            "3) A final natural-language answer"
+        ]);
+    }
+
+    private function buildToolCatalogText(array $tools): string
+    {
+        if (empty($tools)) {
+            return "TOOLS AVAILABLE: (none)";
+        }
+
+        $lines = ["TOOLS AVAILABLE:"];
+        foreach ($tools as $t) {
+            $name = $t['name'] ?? '(missing name)';
+            $desc = $t['description'] ?? '';
+            $required = $t['parameters']['required'] ?? [];
+            $reqStr = !empty($required) ? implode(", ", $required) : "(none)";
+            $lines[] = "- {$name}: {$desc} | required: {$reqStr}";
+        }
+        return implode("\n", $lines);
+    }
+
+    private function injectAgentSystemContext(array $messages, array $tools): array
+    {
+        $routerPrompt = $this->getAgentRouterPrompt();
+
+        // ALWAYS include tool catalog in agent mode
+        $routerPrompt .= "\n\n" . $this->buildToolCatalogText($tools);
+
+        array_unshift($messages, [
+            'role' => 'system',
+            'content' => $routerPrompt
+        ]);
+
+        return $messages;
+    }
+
+    private function runAgentLoop(string $model, array $params, ?int $project_id): array
+    {
+        $messages = $params['messages'] ?? [];
+        $tools = $this->loadToolsForProject($project_id);
+
+        $this->emDebug("AGENT MODE ENABLED", [
+            'pid' => $project_id,
+            'tool_count' => count($tools),
+            'tool_names' => array_column($tools, 'name')
+        ]);
+
+        $max_steps = (int) ($this->getSystemSetting('agent_max_steps') ?? 8);
+        $step = 0;
+
+        // Inject router system prompt + tool catalog
+        $messages = $this->injectAgentSystemContext($messages, $tools);
+        $params['messages'] = $messages;
+
+        // ⚠️ IMPORTANT: disable native OpenAI tools for agent mode
+        unset($params['tools'], $params['tool_choice']);
+
+        // Prevent recursion
+        unset($params['agent_mode']);
+
+        while ($step < $max_steps) {
+            $step++;
+
+            $this->emDebug("AGENT PROMPT SNAPSHOT", [
+                'system_prompt' => $params['messages'][0]['content'],
+                'user_message' => end($params['messages'])['content'] ?? null
+            ]);
+
+            $response = $this->callLLMOnce($model, $params, $project_id);
+            $this->emDebug("AGENT RAW RESPONSE", $response);
+
+            $content = trim($response['content'] ?? '');
+            $decoded = null;
+
+            // Attempt to extract JSON tool_call even if surrounded by text
+            if (preg_match('/\{[\s\S]*"tool_call"[\s\S]*\}/', $content, $matches)) {
+                $decoded = json_decode($matches[0], true);
+            }
+
+            if (is_array($decoded) && isset($decoded['tool_call'])) {
+                $tool_call = $decoded['tool_call'];
+                $tool_name = $tool_call['name'] ?? null;
+                $arguments = $tool_call['arguments'] ?? [];
+
+                if (!$tool_name) {
+                    return $this->agentError("INVALID_TOOL_CALL", "Tool name missing");
+                }
+
+                $execution = $this->executeToolCall(
+                    tool_name: $tool_name,
+                    arguments: $arguments,
+                    tools: $tools,
+                    project_id: $project_id
+                );
+
+                // Ask user for missing params and STOP
+                if (($execution['type'] ?? '') === 'MISSING_PARAMETERS') {
+                    return [
+                        'role' => 'assistant',
+                        'content' => $this->askForMoreInfoText(
+                            $tool_name,
+                            $execution['missing'] ?? []
+                        )
+                    ];
+                }
+
+                if ($execution['error'] ?? false) {
+                    return $execution;
+                }
+
+                // ✅ Inject tool result as SYSTEM context (NOT role=tool)
+                $messages[] = [
+                    'role' => 'system',
+                    'content' =>
+                        "TOOL RESULT [{$tool_name}]:\n" .
+                        json_encode($execution['result'], JSON_PRETTY_PRINT)
+                ];
+
+                $params['messages'] = $messages;
+                continue;
+            }
+
+            // No tool call → final answer
+            return $response;
+        }
+
+        return $this->agentError(
+            "AGENT_MAX_STEPS_EXCEEDED",
+            "Agent exceeded maximum allowed steps"
+        );
+    }
+
+    private function callLLMOnce(string $model, array $params, ?int $project_id): array
+    {
+        $this->initSecureChatAI();
+
+        if (!isset($this->modelConfig[$model])) {
+            throw new Exception('Unsupported model: ' . $model);
+        }
+
+        $modelConfig = $this->modelConfig[$model];
+        $api_endpoint = $modelConfig['api_url'];
+
+        foreach ($modelConfig['required'] as $param) {
+            if (empty($params[$param])) {
+                throw new Exception('Missing required parameter: ' . $param);
+            }
+        }
+
+        $filteredParams = $this->filterDefaultParamsForModel($model, $params);
+
+        switch ($model) {
+            case 'gpt-4o':
+            case 'ada-002':
+                $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                $responseData = $gpt->sendRequest($api_endpoint, $filteredParams);
+                break;
+            case 'deepseek':
+                $generic = new GenericModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
+                break;
+            case 'whisper':
+                $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                $whisper->setHeaders(['Content-Type: multipart/form-data','Accept: application/json']);
+                $whisper->setAuthKeyName($modelConfig['whisper']['api_key_var'] ?? 'api-key');
+                $responseData = $whisper->sendRequest($api_endpoint, $params);
+                break;
+            case 'gpt-4.1':
+            case 'o1':
+            case 'o3-mini':
+            case 'llama3370b':
+            case 'llama-Maverick':
+                $filteredParams = $this->filterDefaultParamsForModel($model, $params);
+                $generic = new GenericModelRequest($this, $modelConfig, [], $model);
+                $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
+                break;
+            case 'claude':
+                $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                $responseData = $claude->sendRequest($api_endpoint, $filteredParams);
+                break;
+            case 'gemini20flash':
+            case 'gemini25pro':
+                $gemini = new GeminiModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                $responseData = $gemini->sendRequest($api_endpoint, $filteredParams);
+                break;
+            case 'gpt-4o-tts':
+            case 'tts':
+                $tts = new GPT4oMiniTTSModelRequest($this, $modelConfig, $this->defaultParams, $model);
+                $responseData = $tts->sendRequest($api_endpoint, $params);
+                break;
+            default:
+                throw new Exception("Unsupported model configuration for: $model");
+        }
+
+        $normalizedResponse = $this->normalizeResponse($responseData, $model);
+
+        if ($project_id) {
+            $this->logInteraction($project_id, $params, $responseData);
+        }
+
+        return $normalizedResponse;
+    }
+
+    private function executeToolCall(
+        string $tool_name,
+        array $arguments,
+        array $tools,
+        ?int $project_id
+    ): array {
+        $tool = null;
+
+        foreach ($tools as $t) {
+            if (($t['name'] ?? null) === $tool_name) {
+                $tool = $t;
+                break;
+            }
+        }
+
+        if (!$tool) {
+            return $this->agentError("UNKNOWN_TOOL", "Tool '{$tool_name}' not registered");
+        }
+
+        // ---- Required args check ----
+        $required = $tool['parameters']['required'] ?? [];
+        $missing  = array_diff($required, array_keys($arguments));
+
+        if (!empty($missing)) {
+            return [
+                'error'   => true,
+                'type'    => 'MISSING_PARAMETERS',
+                'missing' => array_values($missing)
+            ];
+        }
+
+        // ---- Same-project EM call ----
+        if (($tool['endpoint'] ?? '') === 'module_api') {
+            return [
+                'error'  => false,
+                'result' => $this->redcap_module_api(
+                    $tool['module']['action'],
+                    $arguments
+                )
+            ];
+        }
+
+        // ---- Cross-project REDCap API call ----
+        if (($tool['endpoint'] ?? '') === 'redcap_api') {
+            try {
+                $apiUrl   = rtrim($this->getSystemSetting('agent_tools_redcap_api_url'), '/') . '/';
+                $apiToken = $this->getSystemSetting('agent_tools_project_api_key');
+
+                if (empty($apiUrl) || empty($apiToken)) {
+                    return $this->agentError(
+                        "MISCONFIGURED_AGENT_TOOLS",
+                        "Missing agent_tools_redcap_api_url or agent_tools_project_api_key"
+                    );
+                }
+
+                $payload = array_merge([
+                    'token'        => $apiToken,
+                    'content'      => 'externalModule',
+                    'format'       => 'json',
+                    'returnFormat' => 'json',
+                    'prefix'       => $tool['redcap']['prefix'],
+                    'action'       => $tool['redcap']['action'],
+                ], $arguments);
+
+                $client = new \GuzzleHttp\Client([
+                    'timeout' => 10
+                ]);
+
+                $response = $client->post($apiUrl, [
+                    'form_params' => $payload
+                ]);
+
+                $body = json_decode((string) $response->getBody(), true);
+
+                return [
+                    'error'  => false,
+                    'result' => $body
+                ];
+
+            } catch (\Throwable $e) {
+                return $this->agentError(
+                    "REDCAP_API_ERROR",
+                    $e->getMessage()
+                );
+            }
+        }
+
+        return $this->agentError(
+            "UNSUPPORTED_TOOL_ENDPOINT",
+            "Endpoint '{$tool['endpoint']}' not supported"
+        );
+    }
+
+    private function askForMoreInfoText(string $tool_name, array $missing_fields): string
+    {
+        return "I need: " . implode(", ", $missing_fields) . " to use {$tool_name}.";
+    }
+
+    private function agentError(string $type, string $message): array
+    {
+        return [
+            'error' => true,
+            'type' => $type,
+            'message' => $message
+        ];
+    }
+
+// OPTIONAL FOR LATER , MODEL SPECIFIC STUFF
+private function modelSupportsNativeTools(string $model): bool
+{
+    // Intentionally disabled for initial agent rollout
+    return false;
+
+    /*
+    $raw = (string) ($this->getSystemSetting('agent_tools_native_models') ?? '');
+    $allow = array_filter(array_map('trim', explode(',', $raw)));
+    if (empty($allow)) return false;
+
+    return in_array($model, $allow, true);
+    */
+}
+
+private function toOpenAIToolsShape(array $tools): array
+{
+    // Intentionally disabled for initial agent rollout
+    return [];
+
+    /*
+    $out = [];
+    foreach ($tools as $t) {
+        if (empty($t['name'])) continue;
+        $out[] = [
+            'type' => 'function',
+            'function' => [
+                'name' => $t['name'],
+                'description' => $t['description'] ?? '',
+                'parameters' => $t['parameters'] ?? [
+                    'type' => 'object',
+                    'properties' => []
+                ]
+            ]
+        ];
+    }
+    return $out;
+    */
+}
+// OPTIONAL FOR LATER , MODEL SPECIFIC STUFF
+
+
+
 
     private function normalizeResponse($response, $model)
     {
@@ -262,7 +600,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             $normalized = $response;
         }
 
-        $this->emDebug("normalized responseData", $normalized);
+        // $this->emDebug("normalized responseData", $normalized);
         return $normalized;
     }
 

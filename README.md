@@ -1,153 +1,233 @@
 # SecureChatAI External Module (EM)
 
-SecureChatAI is a REDCap External Module that provides a unified interface to Stanford’s Secure AI endpoints—including OpenAI (GPT-4o, GPT-4.1, Ada), Gemini, Claude, Llama, and more.
-**Requires VPN connection to SOM/SHC.**
+SecureChatAI is a **service-oriented REDCap External Module** that provides a unified, policy-controlled gateway to Stanford-approved AI models.
+
+It acts as the **foundational AI runtime layer** for the REDCap AI ecosystem, enabling chatbots, RAG pipelines, background jobs, and agentic workflows to access multiple LLM providers through a single, auditable interface.
+
+**Requires VPN connection to SOM / SHC.**
 
 ---
 
-## Features
+## What This Module Is (and Is Not)
 
-* **Unified interface:** Call any supported model (`gpt-4o`, `gpt-4.1`, `gemini20flash`, `claude`, `llama-Maverick`, etc) via a single function.
-* **Auto-param filtering:** Only sends parameters the chosen model supports; avoids 400 errors from unexpected params.
-* **Robust error logging:** All interactions, errors, and usage stats are logged to emLogger.
-* **Easy to extend:** Add new models with minimal code changes.
+### What It Is
+
+- A **model-agnostic AI service layer**
+- A **centralized policy and logging boundary**
+- A **runtime for both single-shot and agentic LLM calls**
+- A **secure bridge** between REDCap projects and Stanford AI endpoints
+
+### What It Is Not
+
+- Not a chatbot UI
+- Not a RAG engine
+- Not a workflow engine
+- Not model-specific business logic
+
+Those responsibilities live in **other EMs** (e.g., Chatbot EM, REDCap RAG EM).
 
 ---
 
-## Basic Usage
+## SecureChatAI in the REDCap AI Ecosystem
+
+SecureChatAI is intentionally designed as a **shared dependency**:
+
+- **Chatbot EM (Cappy)**  
+  → Uses SecureChatAI for all LLM calls and optional agent routing
+
+- **REDCap RAG EM**  
+  → Uses SecureChatAI for embeddings and downstream generation
+
+- **Backend services / cron jobs**  
+  → Use SecureChatAI via the REDCap EM API endpoint
+
+This separation ensures:
+- One place to manage credentials
+- One place to enforce policy
+- One place to log and audit AI usage
+
+---
+
+## Core Features
+
+- **Unified model interface**  
+  Call GPT, Gemini, Claude, Llama, DeepSeek, Whisper, etc. via one method.
+
+- **Model-aware parameter filtering**  
+  Only valid parameters are sent to each model.
+
+- **Normalized responses**  
+  All models return a consistent structure.
+
+- **Centralized logging**  
+  Requests, responses, errors, and token usage are logged.
+
+- **Optional agentic workflows**  
+  Controlled, project-scoped tool invocation with strict limits.
+
+- **REDCap EM API support**  
+  Secure external access without exposing raw model keys.
+
+---
+
+## Supported Model Categories
+
+### Chat / Completion Models
+- `gpt-4o`
+- `gpt-4.1`
+- `o1`, `o3-mini`
+- `claude`
+- `gemini20flash`, `gemini25pro`
+- `llama3370b`, `llama-Maverick`
+- `deepseek`
+
+### Embeddings
+- `ada-002`
+
+### Audio / Speech
+- `whisper`
+- `gpt-4o-tts`
+
+---
+
+## Architecture Overview
+
+### Runtime Call Flow
+
+1. **Caller (EM, UI, or API)** prepares messages and parameters.
+2. **SecureChatAI**:
+   - Applies defaults
+   - Filters unsupported parameters
+   - Selects the correct model adapter
+3. **Model request is executed** via Stanford-approved endpoint.
+4. **Response is normalized** into a common format.
+5. **Usage and metadata are logged** for audit and monitoring.
+6. **Normalized response is returned** to the caller.
+
+---
+
+### Agentic Workflow (Optional)
+
+When explicitly enabled:
+
+1. Caller sets `agent_mode = true`
+2. SecureChatAI injects:
+   - A router system prompt
+   - A project-scoped tool catalog
+3. The model may:
+   - Ask for clarification
+   - Call a registered tool
+   - Produce a final answer
+4. Tool calls are:
+   - Strictly validated
+   - Project-scoped
+   - Step-limited
+5. Tool results are injected back as **system context**
+6. The loop exits with a final response or error
+
+Agent mode is:
+- Opt-in
+- Globally toggleable
+- Disabled by default
+
+---
+
+## Basic Usage (Internal EM Calls)
 
 ```php
-// Get module instance (from another EM)
 $em = \ExternalModules\ExternalModules::getModuleInstance("secure_chat_ai");
 
-// Prepare parameters for your model
-$messages = [
-    ["role" => "user", "content" => "Say hi from SecureChatAI!"]
-];
 $params = [
-    'messages' => $messages,
-    'temperature' => 0.7,   // Optional; see below
-    'max_tokens' => 512     // Optional; see below
+    'messages' => [
+        ['role' => 'user', 'content' => 'Hello from SecureChatAI']
+    ],
+    'temperature' => 0.7,
+    'max_tokens' => 512
 ];
-$model = "gpt-4o"; // or "o1", "gemini20flash", etc.
-$project_id = 108; // Optional
 
-// Call the model
-$response = $em->callAI($model, $params, $project_id);
+$response = $em->callAI("gpt-4o", $params, $project_id);
+
 ```
 
-**Result:**
-Normalized associative array with content, model, and token usage.
-
----
-
-## Model Support & Example Calls
-
-* **Chat Models** (`gpt-4o`, `gpt-4.1`, `o1`, `o3-mini`, `llama3370b`, `llama-Maverick`, `gemini20flash`, `claude`)
-
-  * Pass `messages` as array of ChatML objects (`role` + `content`).
-  * Only include parameters supported by the target model.
-* **Embeddings** (`ada-002`)
-
-  * Pass `input` as a string.
-* **Transcription** (`whisper`)
-
-  * Pass `file` (path to audio file), `language`, etc.
-
-**Example:**
-
-```php
-// GPT-4o
-$em->callAI("gpt-4o", ['messages' => $messages]);
-
-// Ada-002 Embedding
-$em->callAI("ada-002", ['input' => 'The quick brown fox']);
-
-// Whisper
-$em->callAI("whisper", [
-    'file' => '/path/to/audio.wav',
-    'language' => 'en'
-]);
-```
-
----
-
-## Response Format
-
-All chat model responses are normalized:
+## Response Format (Normalized)
 
 ```php
 [
-    'content' => 'AI response text',
+    'content' => 'Model response text',
     'role' => 'assistant',
     'model' => 'gpt-4o',
     'usage' => [
-        'prompt_tokens' => 16,
-        'completion_tokens' => 20,
-        'total_tokens' => 36
+        'prompt_tokens' => 42,
+        'completion_tokens' => 128,
+        'total_tokens' => 170
     ]
 ]
 ```
 
-Embeddings:
-
-```php
-[
-    0.0015534189,
-    -0.016994879,
-    // ...
-]
-```
+Embeddings return a numeric vector array.
 
 ---
 
-## Model Parameters
+## Public Methods
 
-* **temperature, top\_p, frequency\_penalty, presence\_penalty, max\_tokens**
+### `callAI(string $model, array $params, ?int $project_id = null)`
 
-  * Most chat models accept these. Defaults are configurable in the EM settings.
-  * Only supported parameters are sent to each model.
-* **reasoning\_effort**
+Primary entry point for all model calls.
 
-  * Only for `o1`, `o3-mini`.
-* **json\_schema**
-
-  * Only for models supporting function calling/schema output (`gpt-4.1`, `o1`, etc).
-
-See **EM configuration** for full list and defaults.
+- Handles retries
+- Applies model-specific parameter filtering
+- Routes to agent mode if requested
 
 ---
 
-## Logging
+### `extractResponseText(array $response)`
 
-* All API calls and responses (including errors) are logged to emLogs.
-* Logs include project ID, tokens used, and response payload.
-
----
-
-## Adding New Models
-
-1. Add API config in the EM settings (alias, model ID, endpoint, etc).
-2. If model requires special param filtering, add to `filterDefaultParamsForModel()`.
-3. If response structure differs, update `normalizeResponse()`.
+Returns plain text from a normalized response.
 
 ---
 
-## Requirements
+### `extractUsageTokens(array $response)`
 
-* REDCap 14+ (recommended)
-* VPN connection to Stanford SOM/SHC
-* Proper API credentials for each model endpoint
+Returns token usage metadata.
 
 ---
 
-## Module API Endpoint
+### `extractMetaData(array $response)`
 
-SecureChatAI now exposes a **REDCap External Module API endpoint** for external services (like RAG pipelines) to securely call Stanford-approved AI models.
+Returns model-level metadata (ID, model name, usage).
 
-This allows backend scripts, CRON jobs, or cloud services (e.g., Cloud Run, App Engine) to submit prompts through SecureChatAI using a REDCap API token — without needing direct model keys or VPN routing.
+---
 
-### Example: cURL Request
+### `getSecureChatLogs(int $offset)`
+
+Fetches logged interactions for admin inspection.
+
+---
+
+## Agent Tool Integration
+
+Tools are defined via **system settings** and are:
+
+- Project-scoped
+- Explicitly registered
+- Argument-validated
+- Executed via:
+  - Module API calls, or
+  - REDCap API calls
+
+SecureChatAI does **not** allow arbitrary or ad-hoc tool execution.
+
+---
+
+## External API Access (REDCap EM API)
+
+SecureChatAI exposes a **REDCap External Module API endpoint** for backend services.
+
+### Supported Action
+
+- `callAI`
+
+### Example cURL
 
 ```bash
 curl -X POST "https://redcap.stanford.edu/api/" \
@@ -155,47 +235,54 @@ curl -X POST "https://redcap.stanford.edu/api/" \
   -F "content=externalModule" \
   -F "prefix=secure_chat_ai" \
   -F "action=callAI" \
-  -F "prompt=Summarize this text about RAG pipelines" \
+  -F "prompt=Summarize this RAG pipeline" \
   -F "model=deepseek" \
-  -F "format=json" \
-  -F "returnFormat=json"
+  -F "format=json"
 ```
-
-### Example Response
-
-```json
-{
-  "status": "success",
-  "model": "deepseek",
-  "content": "RAG pipelines combine retrieval and generation...",
-  "usage": {
-    "prompt_tokens": 42,
-    "completion_tokens": 178,
-    "total_tokens": 220
-  }
-}
-```
-
-### API Notes
-
-- **Requires**: A valid REDCap API token from a project where SecureChatAI EM is enabled.  
-  → Typically, this is a *dummy “service project”* created specifically for SecureChatAI.
-- **Access Control**: All requests must include a valid token unless explicitly marked `no-auth` in config.
-- **Supported Action**:  
-  `callAI` — invokes any SecureChatAI-supported model (DeepSeek, GPT-4o, Gemini, Claude, etc.)
-- **Format Support**: JSON (recommended), XML, CSV.
-- **Recommended Use Case**: Backend integrations like RAG pipelines, cron-based summarization, or ingestion workers.
-
 
 ---
 
-## FAQ / Troubleshooting
+## Intended Use Cases
 
-* **Getting 400 errors?**
-  Only supported params are sent for each model. If you see this, check your input or EM config.
-* **Want to use a new model?**
-  Add it in settings and test with the built-in Unit Test page.
+- RAG ingestion pipelines
+- Scheduled summarization jobs
+- Backend AI services running outside REDCap
+- Cloud Run / App Engine workers
 
 ---
 
-**For more details, see the code and the `tests.php` unit test UI.**
+## Configuration Overview
+
+Configured entirely via **System Settings**:
+
+- Model registry (API endpoints, tokens, aliases)
+- Default model selection
+- Parameter defaults
+- Agent mode controls
+- Tool registry
+- Logging and debug flags
+
+No code changes are required to add or modify models.
+
+---
+
+## Security Notes
+
+- Requires REDCap authentication or API token
+- Project-scoped access enforced
+- All interactions are logged
+- No PHI is introduced unless present in input
+- Agent execution is constrained and auditable
+
+---
+
+## Summary
+
+SecureChatAI is the **foundation layer** for AI inside REDCap:
+
+- One gateway
+- Many models
+- Consistent behavior
+- Controlled agentic expansion
+
+Other EMs build **on top of it**, not alongside it.
