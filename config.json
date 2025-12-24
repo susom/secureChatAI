@@ -51,6 +51,55 @@
     
     "system-settings": [
         {
+            "key": "enable_agent_mode",
+            "name": "<b>Enable Agent Mode</b><br><i>(system-wide)</i> Allows SecureChatAI to execute agentic workflows when requested by a project.",
+            "type": "checkbox",
+            "required": false
+        },
+        {
+            "key": "agent_tools_redcap_api_url",
+            "name": "<b>Agent Tools REDCap API URL</b>",
+            "type": "text",
+            "required": true,
+            "default": "http://localhost/api/"
+        },
+        {
+            "key": "agent_router_system_prompt",
+            "name": "<b>Agent Router System Prompt</b><br><i>Defines how the LLM selects and sequences tools during agentic workflows</i>",
+            "type": "textarea",
+            "required": false
+        },
+        {
+            "key": "agent_tools_project_pid",
+            "name": "<b>Agent Tools Project PID</b>",
+            "type": "text",
+            "required": true
+        },
+        {
+            "key": "agent_tools_project_api_key",
+            "name": "<b>Agent Tools Project API Key</b><br><i>API token for the dedicated Agent Tools REDCap project</i>",
+            "type": "text",
+            "required": true
+        },
+        {
+            "key": "agent_tool_registry",
+            "name": "<b>Agent Tool Registry (JSON)</b><br><i>Defines allowed tools for agentic workflows. Project-scoped.</i><br>TODO: automate this",
+            "type": "textarea",
+            "required": false
+        },
+        {
+            "key": "agent_max_steps",
+            "name": "<b>Max Agent Steps</b>",
+            "type": "text",
+            "default": "8"
+        },
+        {
+            "key": "agent_max_clarifications",
+            "name": "<b>Max Agent Clarification Requests</b>",
+            "type": "text",
+            "default": "2"
+        },
+        {
             "key": "api-settings",
             "name": "<b>AI Model API Settings</b>",
             "required": true,
