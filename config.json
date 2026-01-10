@@ -89,9 +89,21 @@
         },
         {
             "key": "agent_max_steps",
-            "name": "<b>Max Agent Steps</b>",
+            "name": "<b>Agent: Max Steps Per Loop</b><br><i>Maximum number of agent reasoning iterations</i>",
             "type": "text",
             "default": "8"
+        },
+        {
+            "key": "agent_max_tools_per_run",
+            "name": "<b>Agent: Max Tool Calls Per Run</b><br><i>Maximum total tool executions before terminating</i>",
+            "type": "text",
+            "default": "15"
+        },
+        {
+            "key": "agent_timeout_seconds",
+            "name": "<b>Agent: Max Execution Time (seconds)</b><br><i>Maximum wall-clock time for agent loop</i>",
+            "type": "text",
+            "default": "120"
         },
         {
             "key": "agent_max_clarifications",
