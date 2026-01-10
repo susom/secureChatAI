@@ -108,27 +108,69 @@ This separation ensures:
 
 ### Agentic Workflow (Optional)
 
+#### Tiktoken-based Dynamic Max Tokens
+Starting with the 2026-01-12 release, SecureChatAI now calculates the prompt token count using the Yethee\Tiktoken library to automatically scale max tokens for each model. This ensures:
+- Agentic flows have enough headroom to avoid truncation.
+- Non-agent calls also benefit from higher overall token limits.
+- We minimize wasted tokens by only allocating as many as needed.
+
+Configuration details:
+- See computeDynamicMaxTokens() in SecureChatAI.php for per-model token buffers.
+- The default fallback is up to 16k tokens or more, depending on the model.
+- Agent mode also bumps maximum tokens to ensure multi-step tool usage remains stable.
+
+
 When explicitly enabled:
 
 1. Caller sets `agent_mode = true`
-2. SecureChatAI injects:
-   - A router system prompt
-   - A project-scoped tool catalog
-3. The model may:
-   - Ask for clarification
-   - Call a registered tool
-   - Produce a final answer
+2. SecureChatAI:
+   - Forces a JSON schema-capable model (gpt-4.1, o1, o3-mini, llama3370b)
+   - Auto-switches to `o1` if the requested model doesn't support structured output
+   - Injects a router system prompt
+   - Injects a project-scoped tool catalog
+   - Enforces strict JSON schema for agent responses
+3. The model must respond with:
+   - `{"tool_call": {"name": "...", "arguments": {...}}}` for tool execution
+   - `{"final_answer": "..."}` for all other responses (including clarifications)
 4. Tool calls are:
-   - Strictly validated
-   - Project-scoped
-   - Step-limited
-5. Tool results are injected back as **system context**
+   - Strictly validated against registered tools
+   - Project-scoped (cannot access other projects)
+   - Step-limited (default: 8 iterations max)
+   - Tool-count limited (default: 15 total tool calls max)
+   - Time-limited (default: 120 second timeout)
+5. Tool results are injected back as **user context** (standard practice)
 6. The loop exits with a final response or error
 
 Agent mode is:
-- Opt-in
+- Opt-in (requires `enable_agent_mode` system setting)
 - Globally toggleable
 - Disabled by default
+- Fully backward compatible (non-agent calls unchanged)
+
+#### Agent Mode Hardening (2026-01-08)
+
+Recent improvements ensure production-grade reliability:
+
+**Response Handling:**
+- **JSON Schema Enforcement**: Models must return structured JSON (fallback to plain text if needed)
+- **Control Character Stripping**: Removes formatting characters that break JSON parsing
+- **HTML Entity Decoding**: Handles REDCap-encoded responses automatically
+- **Emergency Backstop Regex**: Extracts answers even from truncated/malformed JSON
+- **Model Auto-Selection**: Non-schema models auto-switch to compatible models
+- **Graceful Degradation**: Plain text responses work even when JSON schema fails
+
+**Safety Limits:**
+- **Tool Result Size Capping**: Large tool results truncated intelligently (default: 8000 chars)
+- **Tool Definition Validation**: Malformed tool configs rejected at load time with error logging
+- **Tool Loop Detection**: Prevents infinite loops (max 3 calls to same tool+args in last 5 steps)
+- **Increased Token Budget**: Agent mode uses 4000 tokens (vs 800) to prevent mid-response truncation
+
+**Observability:**
+- **Tool Usage Metadata**: Responses include which tools were used (for UI indicators)
+- **Enhanced Logging**: Step-by-step debug traces for agent execution
+- **Friendly Error Messages**: All agent errors return polite user-facing text
+
+This means agent mode can be enabled in production without breaking existing chat functionality or leaking JSON/errors to users.
 
 ---
 
@@ -160,11 +202,17 @@ $response = $em->callAI("gpt-4o", $params, $project_id);
         'prompt_tokens' => 42,
         'completion_tokens' => 128,
         'total_tokens' => 170
+    ],
+    'tools_used' => [ // Only present in agent mode responses
+        ['name' => 'records.getUserIdByFullName', 'arguments' => ['full_name' => 'John Doe'], 'step' => 1],
+        ['name' => 'records.getClinicalData', 'arguments' => ['record_id' => '12345'], 'step' => 2]
     ]
 ]
 ```
 
-Embeddings return a numeric vector array.
+**Notes:**
+- Embeddings return a numeric vector array.
+- `tools_used` array is only present when agent mode executed tools successfully.
 
 ---
 
@@ -217,6 +265,20 @@ Tools are defined via **system settings** and are:
 
 SecureChatAI does **not** allow arbitrary or ad-hoc tool execution.
 
+### Tool Definition Requirements
+
+All tool definitions are validated at load time. Required fields:
+
+- `name` - Tool identifier (alphanumeric + `_` `.` only, must start with letter)
+- `description` - Clear description of tool purpose
+- `endpoint` - Must be `module_api`, `redcap_api`, or `http`
+- `parameters` - Must be an object with `type: "object"`
+- Endpoint-specific fields:
+  - For `redcap_api`: `redcap.prefix` and `redcap.action`
+  - For `module_api`: `module.action`
+
+Malformed tools are rejected with error logging and will not be available to agents.
+
 ---
 
 ## External API Access (REDCap EM API)
@@ -255,14 +317,20 @@ curl -X POST "https://redcap.stanford.edu/api/" \
 
 Configured entirely via **System Settings**:
 
-- Model registry (API endpoints, tokens, aliases)
-- Default model selection
-- Parameter defaults
-- Agent mode controls
-- Tool registry
-- Logging and debug flags
+- **Model registry** (API endpoints, tokens, aliases)
+- **Default model selection**
+- **Parameter defaults** (temperature, top_p, max_tokens, etc.)
+- **Agent mode controls**:
+  - `enable_agent_mode` - Global toggle for agentic workflows
+  - `agent_max_steps` - Max reasoning iterations per request (default: 8)
+  - `agent_max_tools_per_run` - Max total tool calls before termination (default: 15)
+  - `agent_timeout_seconds` - Max wall-clock execution time (default: 120)
+  - `agent_max_tool_result_chars` - Max chars per tool result before truncation (default: 8000)
+  - `agent_router_system_prompt` - Defines agent routing behavior
+  - `agent_tool_registry` - JSON-defined, project-scoped tool catalog
+- **Logging and debug flags**
 
-No code changes are required to add or modify models.
+No code changes are required to add or modify models or tools.
 
 ---
 

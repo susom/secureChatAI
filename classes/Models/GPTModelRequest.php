@@ -46,6 +46,11 @@ class GPTModelRequest extends BaseModelRequest {
      */
     private function prepareRequestData(array $params): string
     {
+        // Embedding requests (with 'input' key) don't need chat defaultParams
+        if (isset($params['input'])) {
+            return json_encode($params) ?: '[]';
+        }
+
         $mergedParams = array_merge($this->defaultParams, $params);
         unset($mergedParams["reasoning_effort"]); // Remove unsupported key for GPT-4o
         return json_encode($mergedParams) ?: '[]';

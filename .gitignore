@@ -17,4 +17,13 @@
 [Tt]humbs.db
 
 # Emacs backup files
+
+/vendor/
+/node_modules/
+*.log
+.env
+
 *~
+.cappyignore
+CAPPY.md
+logs/

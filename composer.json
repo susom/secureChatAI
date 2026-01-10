@@ -1,0 +1,5 @@
+{
+    "require": {
+        "yethee/tiktoken": "^1.1"
+    }
+}
