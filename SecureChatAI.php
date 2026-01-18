@@ -588,6 +588,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 $filteredParams = $this->filterDefaultParamsForModel($model, $params);
                 $generic = new GenericModelRequest($this, $modelConfig, [], $model);
                 $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
+                $this->emDebug("RAW GenericModelRequest API RESPONSE", $responseData);
                 break;
             case 'claude':
                 $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams, $model);
@@ -878,6 +879,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             $parseError = json_last_error();
 
             if ($parseError === JSON_ERROR_NONE && is_array($decoded)) {
+                if (!empty($response['preserve_structure'])) {
+                    // Keep the JSON string as-is for structured output
+                    $response['content'] = $content;
+                    return $response;
+                }
+                
                 // Extract from agent schema format
                 if (isset($decoded['final_answer'])) {
                     $content = $decoded['final_answer'];
@@ -1040,6 +1047,11 @@ private function toOpenAIToolsShape(array $tools): array
             'o1', 'o3-mini', 'gpt-4o', 'gpt-5', 'llama3370b', 'gpt-4.1', 'llama-Maverick', 'deepseek'
         ])) {
             $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
+            $decoded = json_decode($normalized['content'], true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $normalized['structured_output'] = $decoded;
+                $normalized['preserve_structure'] = true;
+            }
             $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';
             $normalized['model'] = $response['model'] ?? $model;
             $normalized['usage'] = [
@@ -1107,8 +1119,13 @@ private function toOpenAIToolsShape(array $tools): array
 
     public function extractResponseText($response)
     {
+        // Return structured output as-is if available (already JSON)
+        if (isset($response['structured_output'])) {
+            return $response['structured_output'];
+        }
         return $response['content'] ?? json_encode($response);
     }
+
 
     public function extractUsageTokens($response)
     {
