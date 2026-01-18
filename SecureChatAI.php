@@ -109,6 +109,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             if (isset($merged['reasoning_effort'])) {
                 $strict['reasoning_effort'] = $merged['reasoning_effort'];
             }
+
+            // Preserve json_schema for o1/o3-mini/gpt-5
+            if (isset($merged['json_schema'])) {
+                $strict['json_schema'] = $merged['json_schema'];
+            }
             return $strict;
         }
 
