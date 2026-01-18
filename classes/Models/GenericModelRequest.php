@@ -7,6 +7,32 @@ class GenericModelRequest extends BaseModelRequest
         parent::__construct($module, $modelConfig, $defaultParams, $model);
     }
     
+    /**
+     * Recursively convert empty PHP arrays to stdClass objects
+     * so they encode as {} instead of [] in JSON.
+     * Preserves non-empty arrays as arrays.
+     */
+    private function fixEmptyArrays($data, $key = null) {
+        if (is_array($data)) {
+            // Special case: "required" field must stay as array even if empty
+            if ($key === 'required' || $key === 'enum') {
+                return $data;  // Keep as array
+            }
+            
+            // Empty array in "properties" context → empty object
+            if (empty($data) && $key === 'properties') {
+                return new \stdClass();
+            }
+            
+            // Non-empty array → recurse
+            foreach ($data as $k => $value) {
+                $data[$k] = $this->fixEmptyArrays($value, $k);
+            }
+        }
+        return $data;
+    }
+
+    
     public function sendRequest(string $apiEndpoint, array $params): array
     {
         $mergedParams = array_merge($this->defaultParams, $params);
@@ -25,7 +51,10 @@ class GenericModelRequest extends BaseModelRequest
             unset($mergedParams['json_schema']);
         }
 
+        // Fix empty arrays before encoding to prevent [] instead of {}
+        $mergedParams = $this->fixEmptyArrays($mergedParams);
 
+        // $this->module->emDebug("SENDING TO API (after fixEmptyArrays)", $mergedParams);
         $postfields = json_encode($mergedParams);
 
         // Dynamically decide if the key should be in header or query string
