@@ -14,7 +14,7 @@ class GenericModelRequest extends BaseModelRequest
 
         // Handle json_schema wrapping if present
         if (isset($mergedParams['json_schema'])) {
-            $mergedParams['format'] = [
+            $mergedParams['response_format'] = [
                 'type' => 'json_schema',
                 'json_schema' => $mergedParams['json_schema']
             ];
