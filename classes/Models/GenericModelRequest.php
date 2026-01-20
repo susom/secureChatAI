@@ -40,14 +40,26 @@ class GenericModelRequest extends BaseModelRequest
 
         // Handle json_schema wrapping with proper OpenAI format
         if (isset($mergedParams['json_schema'])) {
-            $mergedParams['response_format'] = [
-                'type' => 'json_schema',
-                'json_schema' => [
-                    'name' => 'agent_response',
-                    'strict' => true,
-                    'schema' => $mergedParams['json_schema']
-                ]
-            ];
+            // Check if already wrapped (has 'name' and 'schema' fields)
+            $isWrapped = isset($mergedParams['json_schema']['name']) && isset($mergedParams['json_schema']['schema']);
+
+            if ($isWrapped) {
+                // Already wrapped by caller (e.g., agent mode) - use as-is
+                $mergedParams['response_format'] = [
+                    'type' => 'json_schema',
+                    'json_schema' => $mergedParams['json_schema']
+                ];
+            } else {
+                // Bare schema from external API - wrap it
+                $mergedParams['response_format'] = [
+                    'type' => 'json_schema',
+                    'json_schema' => [
+                        'name' => 'response',
+                        'strict' => true,
+                        'schema' => $mergedParams['json_schema']
+                    ]
+                ];
+            }
             unset($mergedParams['json_schema']);
         }
 
