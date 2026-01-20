@@ -41,18 +41,18 @@
         ]
     },
     "no-auth-pages": [],
-    
+
     "api-actions": {
         "callAI": {
             "description": "Proxy AI calls (DeepSeek, GPT, etc.) for external pipelines",
             "access": ["auth"]
         }
     },
-    
+
     "system-settings": [
         {
             "key": "enable_agent_mode",
-            "name": "<b>Enable Agent Mode</b><br><i>(system-wide)</i> Allows SecureChatAI to execute agentic workflows when requested by a project.",
+            "name": "<b>Enable Agent Mode</b><br><i>(system-wide)</i> Allows SecureChatAI to execute agentic workflows when requested by a project. Agent mode is supported only for LLMs that can handle tool use <b>(gpt-4.1, o1, o3-mini, gpt-5, llama3370b)</b>. Ensure REDCap Chatbot EM is configured accordingly per project.",
             "type": "checkbox",
             "required": false
         },
