@@ -145,9 +145,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 } else {
                     if($agent_mode_requested && !$agent_mode_enabled)
                         $this->emDebug("Agent mode requested but not enabled in system settings. Proceeding with normal LLM call.");
-
-                    // Unset agent mode as params are passed via key & will cause error.
-                    unset($params['agent_mode']);
+                        unset($params['agent_mode']);
 
                     // Normal single-call path
                     $response = $this->callLLMOnce($model, $params, $project_id);
@@ -375,10 +373,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // Prevent recursion
         unset($params['agent_mode']);
 
-        // Add strict JSON schema for agent responses
+        // Add JSON schema for agent responses
+        // Note: strict=false because tool arguments are dynamic (incompatible with strict mode)
         $params['json_schema'] = [
             'name' => 'agent_response',
-            'strict' => true,
+            'strict' => false,
             'schema' => [
                 'type' => 'object',
                 'properties' => [
@@ -388,7 +387,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                             'name' => ['type' => 'string'],
                             'arguments' => ['type' => 'object']
                         ],
-                        'required' => ['name', 'arguments']
+                        'required' => ['name', 'arguments'],
+                        'additionalProperties' => false
                     ],
                     'final_answer' => ['type' => 'string'],
                     'thinking' => ['type' => 'string']
