@@ -143,6 +143,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         project_id: $project_id
                     );
                 } else {
+                    if($agent_mode_requested && !$agent_mode_enabled)
+                        $this->emDebug("Agent mode requested but not enabled in system settings. Proceeding with normal LLM call.");
+
+                    // Unset agent mode as params are passed via key & will cause error.
+                    unset($params['agent_mode']);
+
                     // Normal single-call path
                     $response = $this->callLLMOnce($model, $params, $project_id);
                 }
@@ -560,7 +566,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $filteredParams = $this->filterDefaultParamsForModel($model, $params);
 
         [$paramName, $dynamicMax, $promptTokens] = $this->computeDynamicMaxTokens($model, $fullPrompt ?? $filteredParams['messages'][0]['content'] ?? '');
-        $filteredParams[$paramName] = (int)$dynamicMax;  
+        $filteredParams[$paramName] = (int)$dynamicMax;
         $this->emDebug("Dynamic tokens: prompt={$promptTokens}, max={$dynamicMax} for {$model}");
 
         switch ($model) {
@@ -884,7 +890,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     $response['content'] = $content;
                     return $response;
                 }
-                
+
                 // Extract from agent schema format
                 if (isset($decoded['final_answer'])) {
                     $content = $decoded['final_answer'];
@@ -961,7 +967,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             ]
         ];
         $spec = $modelSpecs[$model] ?? null;
-        if($model == "gemini20flash") return ['max_tokens', 8192, 0]; 
+        if($model == "gemini20flash") return ['max_tokens', 8192, 0];
         if (!$spec) return ['max_tokens', 16384, 0];
 
         $promptTokens = $this->estimateTokens($prompt, $model);
@@ -1215,7 +1221,7 @@ private function toOpenAIToolsShape(array $tools): array
                         $params['json_schema'] = $decoded;
                     }
                 }
-                
+
                 $result = $this->callAI($model, $params);
 
                 $response = [
