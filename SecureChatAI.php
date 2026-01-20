@@ -143,9 +143,10 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                         project_id: $project_id
                     );
                 } else {
-                    if($agent_mode_requested && !$agent_mode_enabled)
+                    if($agent_mode_requested && !$agent_mode_enabled){
                         $this->emDebug("Agent mode requested but not enabled in system settings. Proceeding with normal LLM call.");
                         unset($params['agent_mode']);
+                    }
 
                     // Normal single-call path
                     $response = $this->callLLMOnce($model, $params, $project_id);
@@ -333,7 +334,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $schemaModels = ['gpt-4.1', 'o1', 'o3-mini', 'gpt-5', 'llama3370b'];
         if (!in_array($model, $schemaModels)) {
             $this->emDebug("Agent mode requires schema-capable model, switching from {$model} to o1");
-            $model = 'o1'; // Default fallback for agent mode
+            $model = 'o3-mini'; // Default fallback for agent mode
         }
 
         $this->emDebug("AGENT MODE ENABLED", [
