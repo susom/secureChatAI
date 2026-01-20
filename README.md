@@ -125,7 +125,7 @@ When explicitly enabled:
 1. Caller sets `agent_mode = true`
 2. SecureChatAI:
    - Forces a JSON schema-capable model (gpt-4.1, o1, o3-mini, llama3370b)
-   - Auto-switches to `o1` if the requested model doesn't support structured output
+   - Auto-switches to `o3-mini` if the requested model doesn't support structured output
    - Injects a router system prompt
    - Injects a project-scoped tool catalog
    - Enforces strict JSON schema for agent responses
