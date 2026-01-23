@@ -1238,6 +1238,133 @@ private function toOpenAIToolsShape(array $tools): array
                     "headers" => ["Content-Type" => "application/json"]
                 ];
 
+            case "messages":
+                // Claude Messages API compatibility endpoint
+                // Accepts: {model, messages, max_tokens, temperature, system, top_p, stop}
+                // Returns: Claude Messages API format response
+
+                $model = $payload['model'] ?? 'o3-mini';
+                $messages = $payload['messages'] ?? null;
+
+                // Handle messages as JSON string (from form-encoded POST)
+                if (is_string($messages)) {
+                    $decoded = json_decode($messages, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                        $messages = $decoded;
+                    }
+                }
+
+                $max_tokens = isset($payload['max_tokens']) ? (int)$payload['max_tokens'] : 4096;
+                $temperature = isset($payload['temperature']) ? (float)$payload['temperature'] : null;
+                $top_p = isset($payload['top_p']) ? (float)$payload['top_p'] : null;
+                $stop = $payload['stop'] ?? null;
+                $system = $payload['system'] ?? null;
+
+                if (!$messages || !is_array($messages)) {
+                    return [
+                        "status"  => 400,
+                        "body"    => json_encode([
+                            "type" => "error",
+                            "error" => [
+                                "type" => "invalid_request_error",
+                                "message" => "Missing or invalid 'messages' field"
+                            ]
+                        ]),
+                        "headers" => ["Content-Type" => "application/json"]
+                    ];
+                }
+
+                // Map Claude model names to SecureChatAI aliases
+                $modelMap = [
+                    'claude-3-7-sonnet-20250219' => 'claude',
+                    'claude-3-5-sonnet-20241022' => 'claude',
+                    'claude-sonnet-4' => 'claude',
+                    'gpt-4.1' => 'gpt-4.1',
+                    'o1' => 'o1',
+                    'o3-mini' => 'o3-mini',
+                    'gpt-5' => 'gpt-5',
+                    'llama3370b' => 'llama3370b',
+                    'deepseek' => 'deepseek'
+                ];
+                $mappedModel = $modelMap[$model] ?? $model;
+
+                // Prepend system message if provided
+                if ($system) {
+                    array_unshift($messages, [
+                        'role' => 'system',
+                        'content' => $system
+                    ]);
+                }
+
+                // Build params for callAI()
+                $params = ['messages' => $messages];
+
+                if ($temperature !== null) $params['temperature'] = $temperature;
+                if ($top_p !== null) $params['top_p'] = $top_p;
+                if ($stop !== null) $params['stop'] = $stop;
+
+                // Handle max_tokens vs max_completion_tokens
+                if (in_array($mappedModel, ['o1', 'o3-mini', 'gpt-5'])) {
+                    $params['max_completion_tokens'] = $max_tokens;
+                } else {
+                    $params['max_tokens'] = $max_tokens;
+                }
+
+                // Call the AI (no project_id for external API calls)
+                $result = $this->callAI($mappedModel, $params, null);
+
+                // Check for errors
+                if (isset($result['error']) && $result['error']) {
+                    return [
+                        "status"  => 500,
+                        "body"    => json_encode([
+                            "type" => "error",
+                            "error" => [
+                                "type" => $result['type'] ?? "api_error",
+                                "message" => $result['message'] ?? "Internal error"
+                            ]
+                        ]),
+                        "headers" => ["Content-Type" => "application/json"]
+                    ];
+                }
+
+                // Transform to Claude Messages API response format
+                $content = $this->extractResponseText($result);
+                $usage = $this->extractUsageTokens($result);
+
+                // Determine stop_reason
+                $stop_reason = "end_turn";
+                if (isset($result['usage']['completion_tokens']) &&
+                    isset($params['max_tokens']) &&
+                    $result['usage']['completion_tokens'] >= $params['max_tokens']) {
+                    $stop_reason = "max_tokens";
+                }
+
+                $claudeResponse = [
+                    "id" => "msg_" . uniqid(),
+                    "type" => "message",
+                    "role" => "assistant",
+                    "content" => [
+                        [
+                            "type" => "text",
+                            "text" => is_string($content) ? $content : json_encode($content)
+                        ]
+                    ],
+                    "model" => $model,  // Echo back the requested model name
+                    "stop_reason" => $stop_reason,
+                    "stop_sequence" => null,
+                    "usage" => [
+                        "input_tokens" => $usage['prompt_tokens'] ?? 0,
+                        "output_tokens" => $usage['completion_tokens'] ?? 0
+                    ]
+                ];
+
+                return [
+                    "status"  => 200,
+                    "body"    => json_encode($claudeResponse),
+                    "headers" => ["Content-Type" => "application/json"]
+                ];
+
             default:
                 return [
                     "status"  => 400,
