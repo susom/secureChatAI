@@ -40,11 +40,14 @@
             }
         ]
     },
-    "no-auth-pages": [],
 
     "api-actions": {
         "callAI": {
             "description": "Proxy AI calls (DeepSeek, GPT, etc.) for external pipelines",
+            "access": ["auth"]
+        },
+        "messages": {
+            "description": "Claude Messages API compatibility endpoint for Claude Code and Ollama-compatible tools",
             "access": ["auth"]
         }
     },
