@@ -27,7 +27,6 @@ class GPT4oMiniTTSModelRequest extends BaseModelRequest
         if (method_exists($this->module, 'emDebug')) {
             $this->module->emDebug('TTS REQUEST', [
                 'url' => $apiEndpoint,
-                'headers' => $headers,
                 'payload' => $payload,
             ]);
         }
