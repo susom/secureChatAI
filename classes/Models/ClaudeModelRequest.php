@@ -37,7 +37,6 @@ class ClaudeModelRequest extends BaseModelRequest
 
         $this->module->emDebug("Sending ClaudeModelRequest", [
             'endpoint'   => $apiEndpoint,
-            'headers'    => $headers,
             'postfields' => $payload
         ]);
 
