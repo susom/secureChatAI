@@ -125,23 +125,31 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     public function callAI($model, $params = [], $project_id = null)
     {
+        $startTotal = microtime(true);
         $retries = 2;
         $attempt = 0;
 
         while ($attempt <= $retries) {
             try {
+                $startAttempt = microtime(true);
+
                 // --- Agent Mode Gate ---
+
                 $agent_mode_requested = !empty($params['agent_mode']);
                 $agent_mode_enabled = (bool) $this->getSystemSetting('enable_agent_mode');
 
                 $response = null;
 
                 if ($agent_mode_requested && $agent_mode_enabled) {
+                    $startAgentLoop = microtime(true);
                     $response = $this->runAgentLoop(
                         model: $model,
                         params: $params,
                         project_id: $project_id
                     );
+                    $this->emDebug("callAI timing - runAgentLoop", [
+                        'duration_ms' => round((microtime(true) - $startAgentLoop) * 1000, 2)
+                    ]);
                 } else {
                     if($agent_mode_requested && !$agent_mode_enabled){
                         $this->emDebug("Agent mode requested but not enabled in system settings. Proceeding with normal LLM call.");
@@ -149,15 +157,32 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     }
 
                     // Normal single-call path
+                    $startLLMCall = microtime(true);
                     $response = $this->callLLMOnce($model, $params, $project_id);
+                    $this->emDebug("callAI timing - callLLMOnce", [
+                        'duration_ms' => round((microtime(true) - $startLLMCall) * 1000, 2)
+                    ]);
                 }
 
                 // ✅ ALWAYS sanitize output before returning to UI
-                return $this->sanitizeOutputForUI($response);
+                $startSanitize = microtime(true);
+                $sanitizedResponse = $this->sanitizeOutputForUI($response);
+                $this->emDebug("callAI timing - sanitizeOutputForUI", [
+                    'duration_ms' => round((microtime(true) - $startSanitize) * 1000, 2)
+                ]);
+
+                $this->emDebug("callAI timing - attempt complete", [
+                    'attempt' => $attempt + 1,
+                    'attempt_duration_ms' => round((microtime(true) - $startAttempt) * 1000, 2),
+                    'total_duration_ms' => round((microtime(true) - $startTotal) * 1000, 2)
+                ]);
+
+                return $sanitizedResponse;
 
             } catch (\Exception $e) {
                 $attempt++;
                 $this->emDebug("Attempt $attempt: Error", $e->getMessage());
+                $this->emDebug("Model: $model", "$params : $params");
 
                 if ($attempt > $retries) {
                     $error = [
@@ -170,11 +195,20 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     } else {
                         $this->emDebug("Skipping error logging due to missing project ID (pid).");
                     }
+
+                    $this->emDebug("callAI timing - failed after retries", [
+                        'total_duration_ms' => round((microtime(true) - $startTotal) * 1000, 2)
+                    ]);
+
                     // ✅ Sanitize errors too
                     return $this->sanitizeOutputForUI($error);
                 }
             }
         }
+
+        $this->emDebug("callAI timing - unknown error fallback", [
+            'total_duration_ms' => round((microtime(true) - $startTotal) * 1000, 2)
+        ]);
 
         // ✅ Sanitize fallback error
         return $this->sanitizeOutputForUI([
