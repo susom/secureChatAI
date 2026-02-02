@@ -78,11 +78,12 @@ abstract class BaseModelRequest implements ModelInterface {
         curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
 
         // TODO: Remove this block once proper DNS resolution is restored
-        curl_setopt($ch, CURLOPT_RESOLVE, [
-            'apim.stanfordhealthcare.org:443:10.249.134.5',
-            'som-redcap-whisper.openai.azure.com:443:10.153.192.4',
-            'som-redcap.openai.azure.com:443:10.249.50.7'
-        ]);
+        // TEMPORARILY DISABLED 2026-02-02: Testing if DNS now works without hardcoding
+        // curl_setopt($ch, CURLOPT_RESOLVE, [
+        //     'apim.stanfordhealthcare.org:443:10.249.134.5',
+        //     'som-redcap-whisper.openai.azure.com:443:10.153.192.4',
+        //     'som-redcap.openai.azure.com:443:10.249.50.7'
+        // ]);
 
         $response = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
