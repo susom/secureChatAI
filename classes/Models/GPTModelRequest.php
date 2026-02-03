@@ -14,16 +14,43 @@ class GPTModelRequest extends BaseModelRequest {
      */
     public function sendRequest(string $apiEndpoint, array $params): array
     {
-        $apiEndpoint = $this->appendAuthKey($apiEndpoint);
         $requestData = $this->prepareRequestData($params);
-        $response = $this->executeApiCall($apiEndpoint, $requestData);
-        
+
+        // Determine auth method: header-based (APIM) vs query-param (legacy)
+        $useHeaderAuth = $this->shouldUseHeaderAuth();
+
+        if ($useHeaderAuth) {
+            // APIM-style: auth in header
+            $headers = [
+                'Content-Type: application/json',
+                'Accept: application/json',
+                "{$this->auth_key_name}: {$this->apiKey}"
+            ];
+            $response = $this->executeApiCall($apiEndpoint, $requestData, $headers);
+        } else {
+            // Legacy: auth in query param
+            $apiEndpoint = $this->appendAuthKey($apiEndpoint);
+            $response = $this->executeApiCall($apiEndpoint, $requestData);
+        }
+
         $decoded = json_decode($response, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             throw new \Exception("JSON decode error in GPTModelRequest: " . json_last_error_msg());
         }
 
         return $decoded;
+    }
+
+    /**
+     * Determines if auth should be in header (APIM) or query param (legacy).
+     *
+     * @return bool True if auth should be in header, false for query param
+     */
+    private function shouldUseHeaderAuth(): bool
+    {
+        // APIM endpoints use header-based auth (Ocp-Apim-Subscription-Key)
+        // Legacy endpoints use query-param auth (api-key, subscription-key, etc.)
+        return str_contains(strtolower($this->auth_key_name), 'ocp-apim');
     }
 
     /**

@@ -13,11 +13,15 @@ class WhisperModelRequest extends BaseModelRequest
      * @throws \Exception If the request fails.
      */
     public function sendRequest(string $apiEndpoint, array $params): array {
-        $apiEndpoint = $this->appendAuthKey($apiEndpoint);
         $requestData = $this->prepareRequestData($params);
 
-        // Set required headers for Whisper requests
-        $this->setHeaders(['Content-Type: multipart/form-data', 'Accept: application/json']);
+        // Set required headers for Whisper requests (auth + accept)
+        // NOTE: Do NOT set Content-Type for multipart - curl sets it automatically with boundary
+        $headers = [
+            'Accept: application/json',
+            "{$this->auth_key_name}: {$this->apiKey}"
+        ];
+        $this->setHeaders($headers);
 
         $rawResponse = $this->executeApiCall($apiEndpoint, $requestData);
 
@@ -34,12 +38,6 @@ class WhisperModelRequest extends BaseModelRequest
         return $decoded;
     }
     
-
-    private function appendAuthKey(string $apiEndpoint): string
-    {
-        $separator = str_contains($apiEndpoint, '?') ? '&' : '?';
-        return "{$apiEndpoint}{$separator}{$this->auth_key_name}={$this->apiKey}";
-    }
 
     private function prepareRequestData(array $params): array
     {
@@ -65,6 +63,7 @@ class WhisperModelRequest extends BaseModelRequest
         $curlFile = curl_file_create($file, mime_content_type($file), basename($file));
         return [
             'file' => $curlFile,
+            'model' => $this->modelId ?? 'whisper-1',
             'language' => $params['language'] ?? 'en',
             'temperature' => $params['temperature'] ?? '0.0',
             'response_format' => $params['response_format'] ?? 'json'
