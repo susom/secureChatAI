@@ -79,9 +79,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     private function filterDefaultParamsForModel($model, $params)
     {
         // Embedding models don't use chat defaultParams
-        if ($model === 'ada-002') {
+        if ($model === 'ada-002' || $model === 'text-embedding-3-small') {
             return array_merge([
-                'model' => $this->modelConfig[$model]['model_id'] ?? 'text-embedding-ada-002'
+                'model' => $this->modelConfig[$model]['model_id'] ?? $model
             ], $params);
         }
 
@@ -607,6 +607,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         switch ($model) {
             case 'gpt-4o':
             case 'ada-002':
+            case 'text-embedding-3-small':
                 $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams, $model);
                 $responseData = $gpt->sendRequest($api_endpoint, $filteredParams);
                 break;
@@ -616,8 +617,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 break;
             case 'whisper':
                 $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                $whisper->setHeaders(['Content-Type: multipart/form-data','Accept: application/json']);
-                $whisper->setAuthKeyName($modelConfig['whisper']['api_key_var'] ?? 'api-key');
                 $responseData = $whisper->sendRequest($api_endpoint, $params);
                 break;
             case 'gpt-4.1':
@@ -1070,8 +1069,8 @@ private function toOpenAIToolsShape(array $tools): array
         ]);
 
         // Embedding models return their own format - pass through unchanged
-        if ($model === 'ada-002') {
-            $this->emDebug("Passing through ada-002 response unchanged");
+        if ($model === 'ada-002' || $model === 'text-embedding-3-small') {
+            $this->emDebug("Passing through embedding response unchanged for model: {$model}");
             return $response;
         }
 
