@@ -48,7 +48,7 @@ class SecureChatLog extends ASEMLO
     public static function getLogs($module, $project_id, $offset)
     {
 
-        $filter_clause = "project_id = ? order by log_id asc limit 1000 offset $offset";
+        $filter_clause = "project_id = ? order by log_id desc limit 1000 offset $offset";
         $objs = self::queryObjects(
             $module, $filter_clause, [$project_id]
         );
@@ -64,7 +64,7 @@ class SecureChatLog extends ASEMLO
 
     public static function getAllLogs($module, $offset)
     {
-        $filter_clause = "order by log_id asc limit 1000 offset $offset";
+        $filter_clause = "order by log_id desc limit 1000 offset $offset";
         $objs = self::queryObjects(
             $module, $filter_clause, []
         );
