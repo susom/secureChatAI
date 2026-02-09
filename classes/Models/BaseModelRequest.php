@@ -77,10 +77,14 @@ abstract class BaseModelRequest implements ModelInterface {
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
 
-        // TODO: Remove this block once proper DNS resolution is restored
-         curl_setopt($ch, CURLOPT_RESOLVE, [
-             'apim.stanfordhealthcare.org:443:10.249.134.5'
-         ]);
+        // Apply DNS override only if configured (needed for prod site-to-site VPN)
+        // Dev uses firewall-based access and should leave this empty
+        $dnsOverrideIP = $this->module->getSystemSetting('apim_dns_override_ip');
+        if (!empty($dnsOverrideIP)) {
+            curl_setopt($ch, CURLOPT_RESOLVE, [
+                "apim.stanfordhealthcare.org:443:$dnsOverrideIP"
+            ]);
+        }
 
         $response = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
