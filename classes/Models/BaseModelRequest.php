@@ -76,6 +76,7 @@ abstract class BaseModelRequest implements ModelInterface {
         curl_setopt($ch, CURLOPT_TIMEOUT, 500);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
+        curl_setopt($ch, CURLOPT_VERBOSE, true); // Temp verbose for debugging
 
         // Apply DNS override only if configured (needed for prod site-to-site VPN)
         // Dev uses firewall-based access and should leave this empty
