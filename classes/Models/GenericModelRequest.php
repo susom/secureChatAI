@@ -6,7 +6,7 @@ class GenericModelRequest extends BaseModelRequest
     public function __construct($module, array $modelConfig, array $defaultParams, string $model) {
         parent::__construct($module, $modelConfig, $defaultParams, $model);
     }
-    
+
     /**
      * Recursively convert empty PHP arrays to stdClass objects
      * so they encode as {} instead of [] in JSON.
@@ -18,12 +18,12 @@ class GenericModelRequest extends BaseModelRequest
             if ($key === 'required' || $key === 'enum') {
                 return $data;  // Keep as array
             }
-            
+
             // Empty array in "properties" context → empty object
             if (empty($data) && $key === 'properties') {
                 return new \stdClass();
             }
-            
+
             // Non-empty array → recurse
             foreach ($data as $k => $value) {
                 $data[$k] = $this->fixEmptyArrays($value, $k);
@@ -32,7 +32,7 @@ class GenericModelRequest extends BaseModelRequest
         return $data;
     }
 
-    
+
     public function sendRequest(string $apiEndpoint, array $params): array
     {
         $mergedParams = array_merge($this->defaultParams, $params);
@@ -80,8 +80,9 @@ class GenericModelRequest extends BaseModelRequest
             // Legacy OpenAI style: send as query string
             $separator = str_contains($apiEndpoint, '?') ? '&' : '?';
             $apiEndpoint .= "{$separator}{$keyHeaderName}={$this->apiKey}";
+            $this->module->emDebug("HEADERS:     ", $headers);
         }
-
+        $this->module->emDebug("POSTFIELDS:    ", $postfields);
         // DEBUG: Log json_encode result (false = invalid UTF-8 or other encoding issue)
         if ($postfields === false) {
             $this->module->emDebug("DEBUG_GENERIC: json_encode FAILED", json_last_error_msg());
