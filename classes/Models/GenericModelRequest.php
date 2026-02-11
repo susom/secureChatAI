@@ -82,7 +82,16 @@ class GenericModelRequest extends BaseModelRequest
             $apiEndpoint .= "{$separator}{$keyHeaderName}={$this->apiKey}";
         }
 
+        // DEBUG: Log json_encode result (false = invalid UTF-8 or other encoding issue)
+        if ($postfields === false) {
+            $this->module->emDebug("DEBUG_GENERIC: json_encode FAILED", json_last_error_msg());
+        }
+
         $rawResponse = $this->executeAPICall($apiEndpoint, $postfields, $headers);
+
+        // DEBUG: Log raw API response before json_decode
+        $this->module->emDebug("DEBUG_GENERIC_RAW_RESPONSE", substr($rawResponse, 0, 1000));
+
         return json_decode($rawResponse, true);
     }
 
