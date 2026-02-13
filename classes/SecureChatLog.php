@@ -72,4 +72,135 @@ class SecureChatLog extends ASEMLO
         $count = count($objs);
         return $count === 0 ? [] : $objs;
     }
+
+    /**
+     * Get logs by session ID
+     * @param SecureChatAI $module
+     * @param string $session_id
+     * @param int|null $project_id Optional project filter
+     * @return array
+     * @throws \Exception
+     */
+    public static function getLogsBySession($module, $session_id, $project_id = null)
+    {
+        if (empty($session_id)) {
+            return [];
+        }
+
+        // Build filter clause for project if specified
+        $project_filter = $project_id !== null ? "and project_id = ?" : "";
+        $params = $project_id !== null ? [$project_id, $session_id] : [$session_id];
+
+        // Query all logs and filter by session_id in PHP 
+        // (session_id is stored in the JSON message payload)
+        $all_logs = $project_id !== null 
+            ? self::getLogs($module, $project_id, 0)
+            : self::getAllLogs($module, 0);
+
+        $filtered = [];
+        foreach ($all_logs as $log_obj) {
+            $log_data = $log_obj->getLog();
+            if (isset($log_data['session_id']) && $log_data['session_id'] === $session_id) {
+                $filtered[] = $log_data;
+            }
+        }
+
+        return $filtered;
+    }
+
+    /**
+     * Rehydrate a complete chat session from atomic logs
+     * Returns a ready-to-use conversation object with messages array and metadata
+     * 
+     * @param SecureChatAI $module
+     * @param string $session_id
+     * @param int|null $project_id Optional project filter
+     * @return array Session object with 'messages', 'metadata', 'stats'
+     * @throws \Exception
+     */
+    public static function rehydrateSession($module, $session_id, $project_id = null)
+    {
+        $logs = self::getLogsBySession($module, $session_id, $project_id);
+        
+        if (empty($logs)) {
+            return [
+                'session_id' => $session_id,
+                'messages' => [],
+                'metadata' => [],
+                'stats' => [
+                    'total_turns' => 0,
+                    'total_tokens' => 0,
+                    'models_used' => []
+                ]
+            ];
+        }
+
+        // Sort by timestamp ascending to maintain conversation order
+        usort($logs, function($a, $b) {
+            return strtotime($a['timestamp'] ?? 0) - strtotime($b['timestamp'] ?? 0);
+        });
+
+        $messages = [];
+        $models = [];
+        $total_tokens = 0;
+        $first_timestamp = null;
+        $last_timestamp = null;
+
+        foreach ($logs as $index => $log) {
+            // Skip error logs for message reconstruction
+            if (!empty($log['error'])) {
+                continue;
+            }
+
+            // Add user message
+            if (!empty($log['user_message'])) {
+                $messages[] = [
+                    'role' => 'user',
+                    'content' => $log['user_message'],
+                    'turn' => $index + 1
+                ];
+            }
+
+            // Add assistant response
+            if (!empty($log['assistant_response'])) {
+                $messages[] = [
+                    'role' => 'assistant',
+                    'content' => $log['assistant_response'],
+                    'turn' => $index + 1,
+                    'tools_used' => $log['tools_used'] ?? null
+                ];
+            }
+
+            // Collect metadata
+            if (!empty($log['model'])) {
+                $models[$log['model']] = true;
+            }
+
+            if (!empty($log['usage']['total_tokens'])) {
+                $total_tokens += $log['usage']['total_tokens'];
+            }
+
+            if ($first_timestamp === null) {
+                $first_timestamp = $log['timestamp'];
+            }
+            $last_timestamp = $log['timestamp'];
+        }
+
+        return [
+            'session_id' => $session_id,
+            'messages' => $messages,
+            'metadata' => [
+                'project_id' => $logs[0]['project_id'] ?? null,
+                'start_time' => $first_timestamp,
+                'end_time' => $last_timestamp,
+                'duration_seconds' => $first_timestamp && $last_timestamp ? 
+                    strtotime($last_timestamp) - strtotime($first_timestamp) : 0
+            ],
+            'stats' => [
+                'total_turns' => count($messages) / 2, // User + Assistant = 1 turn
+                'total_tokens' => $total_tokens,
+                'models_used' => array_keys($models)
+            ]
+        ];
+    }
 }
