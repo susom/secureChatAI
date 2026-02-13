@@ -76,6 +76,17 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return SecureChatLog::getAllLogs($this, $offset);
     }
 
+    /**
+     * Get logs for a specific session ID
+     * @param string $session_id
+     * @param int|null $project_id Optional project filter
+     * @return array
+     */
+    public function getSecureChatLogsBySession($session_id, $project_id = null)
+    {
+        return SecureChatLog::getLogsBySession($this, $session_id, $project_id);
+    }
+
     private function filterDefaultParamsForModel($model, $params)
     {
         // Embedding models don't use chat defaultParams
@@ -1137,23 +1148,87 @@ private function toOpenAIToolsShape(array $tools): array
 
     private function logInteraction($project_id, $requestData, $responseData)
     {
-        $payload = array_merge($requestData, $responseData ?? []);
-        $payload['project_id'] = $project_id;
-        $action = new SecureChatLog($this);
+        // Extract atomic log data - only the current turn, not full conversation history
+        $atomicPayload = [
+            'project_id' => $project_id,
+            'session_id' => $requestData['session_id'] ?? null,
+            'model' => $responseData['model'] ?? ($requestData['model'] ?? 'unknown'),
+            'timestamp' => date('Y-m-d H:i:s')
+        ];
 
-        $action->setValue('message', json_encode($payload));
+        // Extract the last user message from the messages array
+        if (!empty($requestData['messages']) && is_array($requestData['messages'])) {
+            // Find the last user message (skip system messages)
+            $userMessages = array_filter($requestData['messages'], function($msg) {
+                return ($msg['role'] ?? '') === 'user';
+            });
+            $lastUserMessage = !empty($userMessages) ? array_values($userMessages)[count($userMessages) - 1] : null;
+            
+            if ($lastUserMessage) {
+                $atomicPayload['user_message'] = $lastUserMessage['content'] ?? '';
+            }
+        }
+
+        // Extract assistant response
+        if (!empty($responseData)) {
+            // Handle normalized response structure
+            if (isset($responseData['content'])) {
+                $atomicPayload['assistant_response'] = $responseData['content'];
+            } elseif (isset($responseData['choices'][0]['message']['content'])) {
+                $atomicPayload['assistant_response'] = $responseData['choices'][0]['message']['content'];
+            }
+
+            // Extract usage data
+            if (isset($responseData['usage'])) {
+                $atomicPayload['usage'] = $responseData['usage'];
+            }
+
+            // Extract any tool usage metadata
+            if (isset($responseData['tools_used'])) {
+                $atomicPayload['tools_used'] = $responseData['tools_used'];
+            }
+        }
+
+        $action = new SecureChatLog($this);
+        $action->setValue('message', json_encode($atomicPayload));
         $action->setValue('record', 'SecureChatLog');
+        if ($project_id) {
+            $action->setValue('project_id', $project_id);
+        }
         $action->save();
     }
 
     private function logErrorInteraction($project_id, $requestData, $error)
     {
-        $payload = array_merge($requestData, $error);
-        $payload['project_id'] = $project_id;
-        $action = new SecureChatLog($this);
+        // Extract atomic error log data
+        $atomicPayload = [
+            'project_id' => $project_id,
+            'session_id' => $requestData['session_id'] ?? null,
+            'model' => $requestData['model'] ?? 'unknown',
+            'timestamp' => date('Y-m-d H:i:s'),
+            'error' => true,
+            'error_type' => $error['type'] ?? 'UNKNOWN',
+            'error_message' => $error['message'] ?? 'Unknown error'
+        ];
 
-        $action->setValue('message', json_encode($error));
+        // Extract the last user message that caused the error
+        if (!empty($requestData['messages']) && is_array($requestData['messages'])) {
+            $userMessages = array_filter($requestData['messages'], function($msg) {
+                return ($msg['role'] ?? '') === 'user';
+            });
+            $lastUserMessage = !empty($userMessages) ? array_values($userMessages)[count($userMessages) - 1] : null;
+            
+            if ($lastUserMessage) {
+                $atomicPayload['user_message'] = $lastUserMessage['content'] ?? '';
+            }
+        }
+
+        $action = new SecureChatLog($this);
+        $action->setValue('message', json_encode($atomicPayload));
         $action->setValue('record', 'SecureChatLogError');
+        if ($project_id) {
+            $action->setValue('project_id', $project_id);
+        }
         $action->save();
     }
 
