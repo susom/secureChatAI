@@ -87,12 +87,12 @@ class SecureChatLog extends ASEMLO
             return [];
         }
 
-        // Use DB-level filtering via direct query (session_id is stored in parameters table)
+        // Try indexed parameter lookup first (for logs saved after session_id promotion)
         $sql = "SELECT l.log_id FROM redcap_external_modules_log l
-                JOIN redcap_external_modules_log_parameters p 
+                JOIN redcap_external_modules_log_parameters p
                     ON l.log_id = p.log_id AND p.name = 'session_id' AND p.value = ?
                 WHERE l.record IN (?, ?)";
-        
+
         $params = [$session_id, 'SecureChatLog', 'SecureChatLogError'];
 
         if ($project_id !== null) {
@@ -102,15 +102,31 @@ class SecureChatLog extends ASEMLO
 
         $sql .= " ORDER BY l.log_id DESC";
 
+        $module->emDebug("getLogsBySession SQL: $sql with params: " . json_encode($params));
         $result = $module->query($sql, $params);
 
-        // Convert IDs to objects
         $results = [];
         while ($row = $result->fetch_assoc()) {
             $obj = new self($module, $row['log_id']);
             $results[] = $obj->getLog();
         }
 
+        // Fallback: scan JSON message blob for older logs that pre-date parameter promotion
+        if (empty($results)) {
+            $module->emDebug("Parameter lookup empty, falling back to JSON scan for session_id: $session_id");
+            $all_logs = $project_id !== null
+                ? self::getLogs($module, $project_id, 0)
+                : self::getAllLogs($module, 0);
+
+            foreach ($all_logs as $log_obj) {
+                $log_data = $log_obj->getLog();
+                if (isset($log_data['session_id']) && $log_data['session_id'] === $session_id) {
+                    $results[] = $log_data;
+                }
+            }
+        }
+
+        $module->emDebug("Found " . count($results) . " logs for session_id: $session_id");
         return $results;
     }
 

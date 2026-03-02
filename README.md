@@ -281,7 +281,7 @@ All AI interactions are logged atomically (per turn) with the following structur
 **Key features:**
 - **Atomic logging**: Each API call creates one log entry (not cumulative conversation history)
 - **Session tracking**: Pass `session_id` in request params to group related turns
-- **Indexed columns**: `session_id` and `model` are stored as separate DB columns for efficient querying
+- **EAV parameters**: `session_id` and `model` are stored as separate rows in `redcap_external_modules_log_parameters` for JOIN-based querying (not actual columns on the log table, which is core REDCap schema)
 - **No bloat**: System prompts and RAG context are NOT logged (synthesized into responses)
 - **Token tracking**: Usage stats included for cost monitoring
 
@@ -299,6 +299,8 @@ $module->callAI($model, $params, $project_id);
 $session = SecureChatLog::rehydrateSession($module, 'abc123', $project_id);
 // Returns: ['session_id' => '...', 'messages' => [...], 'metadata' => [...], 'stats' => [...]]
 ```
+
+**Session viewer**: The Visualization page (admin logs table) supports clicking any Session ID to open a modal that reconstructs the full conversation in chronological chat format with metadata (duration, tokens, models used). Works for both new logs (fast EAV parameter lookup) and legacy logs (JSON blob fallback).
 
 ---
 

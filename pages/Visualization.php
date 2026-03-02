@@ -12,20 +12,32 @@ function createTable($action, $index) {
     $model = $action['model'] ?? 'N/A';
     $project_id = $action['project_id'] ?? 'N/A';
     $record = $action['record'] ?? 'N/A';
+    $session_id = $action['session_id'] ?? 'N/A';
 
+    // Support both old format (choices/messages) and new atomic format (user_message/assistant_response)
     // Extract tools_used for agent mode display
     $toolsUsed = [];
     if (!empty($action['choices'][0]['message']['tools_used'])) {
         $toolsUsed = $action['choices'][0]['message']['tools_used'];
+    } elseif (!empty($action['tools_used'])) {
+        $toolsUsed = $action['tools_used'];
     }
 
     if($record === "SecureChatLogError"){
         $responseDump = "N/A - Error";
         $queryDump = htmlspecialchars(strip_tags($action['message'] ?? ''), ENT_QUOTES, 'UTF-8');
     } else {
-        $rawResponse = $action['choices'][0]['message']['content'] ?? 'N/A';
+        // Try new atomic format first, fall back to old format
+        if (!empty($action['assistant_response'])) {
+            // New atomic format
+            $rawResponse = $action['assistant_response'];
+            $queryDump = htmlspecialchars($action['user_message'] ?? 'N/A', ENT_QUOTES, 'UTF-8');
+        } else {
+            // Old format
+            $rawResponse = $action['choices'][0]['message']['content'] ?? 'N/A';
+            $queryDump = htmlspecialchars(print_r($action['messages'] ?? [], true), ENT_QUOTES, 'UTF-8');
+        }
         $responseDump = htmlspecialchars($rawResponse, ENT_QUOTES, 'UTF-8');
-        $queryDump = htmlspecialchars(print_r($action['messages'] ?? [], true), ENT_QUOTES, 'UTF-8');
     }
 
 
@@ -54,6 +66,7 @@ function createTable($action, $index) {
     $safeRecord = htmlspecialchars($record, ENT_QUOTES, 'UTF-8');
     $safeTimestamp = htmlspecialchars($timestamp, ENT_QUOTES, 'UTF-8');
     $safeModel = htmlspecialchars($model, ENT_QUOTES, 'UTF-8');
+    $safeSessionId = htmlspecialchars($session_id, ENT_QUOTES, 'UTF-8');
     $safeCompletionTokens = htmlspecialchars($completionTokens, ENT_QUOTES, 'UTF-8');
     $safePromptTokens = htmlspecialchars($promptTokens, ENT_QUOTES, 'UTF-8');
     $safeTotalTokens = htmlspecialchars($totalTokens, ENT_QUOTES, 'UTF-8');
@@ -68,6 +81,7 @@ function createTable($action, $index) {
                 <td>{$safeRecord}</td>
                 <td>{$safeTimestamp}</td>
                 <td>{$safeModel}</td>
+                <td class='session-id-column'>{$safeSessionId}</td>
                 <td>
                     <div class='accordion' id='accordionTokens-{$index}'>
                         <div class='accordion-item'>
@@ -173,10 +187,20 @@ $dateEnd = isset($_GET['dateEnd']) ? $_GET['dateEnd'] : null;
 $offset = 0;
 $a = $module->getSecureChatLogs($offset);
 
+// Check if session detail requested (after $module is available)
+$sessionDetailId = isset($_GET['session_id']) ? $_GET['session_id'] : null;
+if ($sessionDetailId) {
+    header('Content-Type: application/json');
+    $session = \Stanford\SecureChatAI\SecureChatLog::rehydrateSession($module, $sessionDetailId, null);
+    echo json_encode($session);
+    exit;
+}
+
 // Collect unique values for filters
 $uniqueModels = [];
 $uniqueProjects = [];
 $uniqueTypes = [];
+$uniqueSessionIds = [];
 
 $allLogs = []; // Store all logs for analytics
 
@@ -199,6 +223,7 @@ foreach ($a as $index => $v) {
     if (!empty($action['model'])) $uniqueModels[$action['model']] = true;
     if (!empty($action['project_id'])) $uniqueProjects[$action['project_id']] = true;
     if (!empty($action['record'])) $uniqueTypes[$action['record']] = true;
+    if (!empty($action['session_id'])) $uniqueSessionIds[$action['session_id']] = true;
 }
 
 // Logs are already sorted by database (order by log_id desc)
@@ -218,9 +243,11 @@ foreach ($allLogs as $index => $action) {
 $uniqueModels = array_keys($uniqueModels);
 $uniqueProjects = array_keys($uniqueProjects);
 $uniqueTypes = array_keys($uniqueTypes);
+$uniqueSessionIds = array_keys($uniqueSessionIds);
 sort($uniqueModels);
 sort($uniqueProjects);
 sort($uniqueTypes);
+sort($uniqueSessionIds);
 
 // DEMO MODE: Generate fake production data
 if ($isDemoMode) {
@@ -228,6 +255,7 @@ if ($isDemoMode) {
     $fakeModels = ['gpt-4o', 'gpt-4o-mini', 'claude-3.5-sonnet', 'claude-3-haiku', 'gemini-1.5-pro', 'gemini-1.5-flash', 'o1', 'o3-mini', 'gpt-4.1', 'llama-3.3-70b'];
     $fakeProjects = [123, 456, 789, 234, 567];
     $fakeTypes = ['chat_completion', 'agent_call', 'embedding', 'chat_completion'];
+    $fakeSessionIds = ['sess_abc123', 'sess_def456', 'sess_ghi789', 'sess_jkl012', 'sess_mno345'];
     $fakeTools = [
         ['name' => 'searchRAG', 'arguments' => ['query' => 'patient data'], 'step' => 1],
         ['name' => 'getUserData', 'arguments' => ['record_id' => '12345'], 'step' => 2],
@@ -246,6 +274,7 @@ if ($isDemoMode) {
         $isAgent = rand(0, 100) < 25; // 25% agent mode
         $promptTokens = rand(100, 3000);
         $completionTokens = rand(50, 2000);
+        $sessionId = $fakeSessionIds[array_rand($fakeSessionIds)];
 
         $log = [
             'id' => 1000000 + $i,
@@ -253,6 +282,7 @@ if ($isDemoMode) {
             'model' => $model,
             'project_id' => $fakeProjects[array_rand($fakeProjects)],
             'record' => $fakeTypes[array_rand($fakeTypes)],
+            'session_id' => $sessionId,
             'usage' => [
                 'prompt_tokens' => $promptTokens,
                 'completion_tokens' => $completionTokens,
@@ -284,6 +314,7 @@ if ($isDemoMode) {
     $uniqueModels = array_unique($fakeModels);
     $uniqueProjects = $fakeProjects;
     $uniqueTypes = array_unique($fakeTypes);
+    $uniqueSessionIds = array_unique($fakeSessionIds);
 
     // Sort demo logs by ID descending (needed for fake data since it's not from DB)
     usort($allLogs, function($a, $b) {
@@ -375,7 +406,7 @@ if ($isJsonRequest) {
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .id-column, .project-id-column {
+        .id-column, .project-id-column, .session-id-column {
             width: auto;
         }
         .accordion-collapse {
@@ -402,6 +433,14 @@ if ($isJsonRequest) {
             padding: 1rem;
             margin-bottom: 1rem;
             border-radius: 0.5rem;
+        }
+        .session-id-column {
+            cursor: pointer;
+            color: #0d6efd;
+            text-decoration: underline;
+        }
+        .session-id-column:hover {
+            color: #0a58ca;
         }
         .controls-panel {
             display: flex;
@@ -1018,10 +1057,37 @@ if ($isJsonRequest) {
                 </select>
             </div>
             <div class="col-md-3">
+                <label class="form-label">Session ID</label>
+                <select class="form-select form-select-sm" id="sessionFilter">
+                    <option value="">All Sessions</option>
+                    <?php foreach ($uniqueSessionIds as $session): ?>
+                        <option value="<?= htmlspecialchars($session, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($session, ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-3">
                 <label class="form-label">Agent Mode Only</label>
                 <div class="form-check form-switch">
                     <input class="form-check-input" type="checkbox" id="agentModeFilter">
                     <label class="form-check-label" for="agentModeFilter">Show only agent calls</label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Modal -->
+    <div class="modal fade" id="sessionModal" tabindex="-1" aria-labelledby="sessionModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="sessionModalLabel">Session Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="sessionContent">
+                    <!-- Session content loaded via AJAX -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>
@@ -1035,6 +1101,7 @@ if ($isJsonRequest) {
                     <th>Type</th>
                     <th>Timestamp</th>
                     <th>Model</th>
+                    <th>Session ID</th>
                     <th>Tokens</th>
                     <th>Model Meta</th>
                     <th>Query</th>
@@ -1121,6 +1188,11 @@ if ($isJsonRequest) {
         // Type filter
         $('#typeFilter').on('change', function() {
             table.column(2).search(this.value).draw();
+        });
+
+        // Session ID filter
+        $('#sessionFilter').on('change', function() {
+            table.column(5).search(this.value).draw();
         });
 
         // Agent mode filter
@@ -2389,6 +2461,108 @@ if ($isJsonRequest) {
     // Smooth number updates (call with null start to animate from current value)
     function updateNumberSmooth(selector, newValue, displayText) {
         animateNumber(selector, null, newValue, displayText, 1000);
+    }
+
+    // Session Modal - Click on session_id to view conversation
+    $('#logTable').on('click', '.session-id-column', function(e) {
+        e.preventDefault();
+        var sessionId = $(this).text().trim();
+        if (!sessionId || sessionId === 'N/A') return;
+
+        // Show modal with loading state
+        $('#sessionModalLabel').text('Session: ' + sessionId);
+        $('#sessionContent').html('<div class="text-center p-4"><div class="spinner-border" role="status"></div><p class="mt-2">Loading conversation...</p></div>');
+        $('#sessionModal').modal('show');
+
+        // Build URL preserving REDCap module routing params (prefix, page, pid, etc.)
+        var url = new URL(window.location.href);
+        url.searchParams.set('session_id', sessionId);
+        // Remove params that would interfere with session detail response
+        url.searchParams.delete('format');
+        url.searchParams.delete('demo');
+        var ajaxUrl = url.toString();
+        console.log('Fetching session from:', ajaxUrl);
+        
+        // Fetch session data via query param
+        $.ajax({
+            url: ajaxUrl,
+            type: 'GET',
+            success: function(session, textStatus, xhr) {
+                console.log('Got response:', session);
+                if (session.error) {
+                    $('#sessionContent').html('<div class="alert alert-danger">' + session.error + '</div>');
+                    return;
+                }
+
+                if (!session.messages || session.messages.length === 0) {
+                    $('#sessionContent').html('<div class="alert alert-warning">No messages found for this session.</div>');
+                    return;
+                }
+
+                // Build conversation display
+                var html = '<div class="session-meta mb-3 p-3 bg-light rounded">';
+                html += '<strong>Session ID:</strong> ' + session.session_id + '<br>';
+                html += '<strong>Project ID:</strong> ' + (session.metadata?.project_id || 'N/A') + '<br>';
+                html += '<strong>Started:</strong> ' + (session.metadata?.start_time || 'N/A') + '<br>';
+                html += '<strong>Duration:</strong> ' + (session.metadata?.duration_seconds || 0) + ' seconds<br>';
+                html += '<strong>Total Turns:</strong> ' + (session.stats?.total_turns || 0) + '<br>';
+                html += '<strong>Total Tokens:</strong> ' + (session.stats?.total_tokens || 0).toLocaleString() + '<br>';
+                html += '<strong>Models:</strong> ' + (session.stats?.models_used?.join(', ') || 'N/A');
+                html += '</div>';
+
+                html += '<div class="conversation-thread">';
+                
+                var turn = 0;
+                for (var i = 0; i < session.messages.length; i++) {
+                    var msg = session.messages[i];
+                    var isUser = msg.role === 'user';
+                    var bubbleClass = isUser ? 'bg-primary text-white' : 'bg-light';
+                    var alignClass = isUser ? 'justify-content-end' : 'justify-content-start';
+                    var label = isUser ? '👤 User' : '🤖 Assistant';
+                    
+                    // Check if this is a new turn
+                    if (msg.turn !== turn) {
+                        turn = msg.turn;
+                        html += '<hr class="my-4"><div class="turn-label text-muted small mb-2">Turn ' + turn + '</div>';
+                    }
+
+                    html += '<div class="d-flex ' + alignClass + ' mb-3">';
+                    html += '<div class="card ' + bubbleClass + '" style="max-width: 80%;">';
+                    html += '<div class="card-body p-3">';
+                    html += '<div class="small opacity-75 mb-1">' + label + '</div>';
+                    html += '<div class="message-content">' + escapeHtml(msg.content) + '</div>';
+                    
+                    if (!isUser && msg.tools_used && msg.tools_used.length > 0) {
+                        html += '<div class="mt-2 pt-2 border-top small">';
+                        html += '<strong>🛠️ Tools Used:</strong><ul class="mb-0">';
+                        for (var t = 0; t < msg.tools_used.length; t++) {
+                            var tool = msg.tools_used[t];
+                            html += '<li>' + tool.name + '</li>';
+                        }
+                        html += '</ul></div>';
+                    }
+                    
+                    html += '</div></div></div>';
+                }
+                
+                html += '</div>';
+                $('#sessionContent').html(html);
+            },
+            error: function(xhr, status, error) {
+                console.log('Error response:', xhr.responseText);
+                $('#sessionContent').html('<div class="alert alert-danger">Error loading session: ' + error + '<br>Response: ' + xhr.responseText + '</div>');
+            }
+        });
+    });
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
 </script>
