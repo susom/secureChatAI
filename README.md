@@ -59,8 +59,8 @@ This separation ensures:
 - **Normalized responses**  
   All models return a consistent structure.
 
-- **Centralized logging**  
-  Requests, responses, errors, and token usage are logged.
+- **Atomic logging with session tracking**  
+  Each AI interaction logged individually with session IDs for conversation reconstruction. System prompts and RAG are excluded (synthesized into responses).
 
 - **Optional agentic workflows**  
   Controlled, project-scoped tool invocation with strict limits.
@@ -249,6 +249,56 @@ Returns model-level metadata (ID, model name, usage).
 ### `getSecureChatLogs(int $offset)`
 
 Fetches logged interactions for admin inspection.
+
+---
+
+### `getSecureChatLogsBySession(string $session_id, ?int $project_id)`
+
+Fetches all logs for a specific session ID. Useful for retrieving conversation history.
+
+---
+
+### Logging & Session Management
+
+All AI interactions are logged atomically (per turn) with the following structure:
+
+```json
+{
+  "project_id": 123,
+  "session_id": "abc123",
+  "model": "gpt-4o",
+  "timestamp": "2026-02-12 10:30:00",
+  "user_message": "What's the weather?",
+  "assistant_response": "It's sunny!",
+  "usage": {
+    "prompt_tokens": 150,
+    "completion_tokens": 10,
+    "total_tokens": 160
+  }
+}
+```
+
+**Key features:**
+- **Atomic logging**: Each API call creates one log entry (not cumulative conversation history)
+- **Session tracking**: Pass `session_id` in request params to group related turns
+- **Indexed columns**: `session_id` and `model` are stored as separate DB columns for efficient querying
+- **No bloat**: System prompts and RAG context are NOT logged (synthesized into responses)
+- **Token tracking**: Usage stats included for cost monitoring
+
+**To track sessions**, pass `session_id` in your request:
+```php
+$params = [
+    'messages' => [...],
+    'session_id' => 'unique-session-id'  // Enables session reconstruction
+];
+$module->callAI($model, $params, $project_id);
+```
+
+**To rehydrate a conversation** from logs:
+```php
+$session = SecureChatLog::rehydrateSession($module, 'abc123', $project_id);
+// Returns: ['session_id' => '...', 'messages' => [...], 'metadata' => [...], 'stats' => [...]]
+```
 
 ---
 
