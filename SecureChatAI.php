@@ -1195,6 +1195,13 @@ private function toOpenAIToolsShape(array $tools): array
         if ($project_id) {
             $action->setValue('project_id', $project_id);
         }
+        if (!empty($requestData['session_id'])) {
+            $action->setValue('session_id', $requestData['session_id']);
+        }
+        $model = $responseData['model'] ?? ($requestData['model'] ?? null);
+        if (!empty($model)) {
+            $action->setValue('model', $model);
+        }
         $action->save();
     }
 
@@ -1228,6 +1235,13 @@ private function toOpenAIToolsShape(array $tools): array
         $action->setValue('record', 'SecureChatLogError');
         if ($project_id) {
             $action->setValue('project_id', $project_id);
+        }
+        if (!empty($requestData['session_id'])) {
+            $action->setValue('session_id', $requestData['session_id']);
+        }
+        $model = $requestData['model'] ?? null;
+        if (!empty($model)) {
+            $action->setValue('model', $model);
         }
         $action->save();
     }

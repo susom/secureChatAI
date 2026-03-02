@@ -87,25 +87,31 @@ class SecureChatLog extends ASEMLO
             return [];
         }
 
-        // Build filter clause for project if specified
-        $project_filter = $project_id !== null ? "and project_id = ?" : "";
-        $params = $project_id !== null ? [$project_id, $session_id] : [$session_id];
+        // Use DB-level filtering via direct query (session_id is stored in parameters table)
+        $sql = "SELECT l.log_id FROM redcap_external_modules_log l
+                JOIN redcap_external_modules_log_parameters p 
+                    ON l.log_id = p.log_id AND p.name = 'session_id' AND p.value = ?
+                WHERE l.record IN (?, ?)";
+        
+        $params = [$session_id, 'SecureChatLog', 'SecureChatLogError'];
 
-        // Query all logs and filter by session_id in PHP 
-        // (session_id is stored in the JSON message payload)
-        $all_logs = $project_id !== null 
-            ? self::getLogs($module, $project_id, 0)
-            : self::getAllLogs($module, 0);
-
-        $filtered = [];
-        foreach ($all_logs as $log_obj) {
-            $log_data = $log_obj->getLog();
-            if (isset($log_data['session_id']) && $log_data['session_id'] === $session_id) {
-                $filtered[] = $log_data;
-            }
+        if ($project_id !== null) {
+            $sql .= " AND l.project_id = ?";
+            $params[] = $project_id;
         }
 
-        return $filtered;
+        $sql .= " ORDER BY l.log_id DESC";
+
+        $result = $module->query($sql, $params);
+
+        // Convert IDs to objects
+        $results = [];
+        while ($row = $result->fetch_assoc()) {
+            $obj = new self($module, $row['log_id']);
+            $results[] = $obj->getLog();
+        }
+
+        return $results;
     }
 
     /**
