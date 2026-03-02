@@ -1487,6 +1487,26 @@ private function toOpenAIToolsShape(array $tools): array
                     "headers" => ["Content-Type" => "application/json"]
                 ];
 
+            case "getSession":
+                $session_id = $payload['session_id'] ?? null;
+                $project_id = $payload['project_id'] ?? null;
+
+                if (!$session_id) {
+                    return [
+                        "status"  => 400,
+                        "body"    => json_encode(["error" => "Missing session_id"]),
+                        "headers" => ["Content-Type" => "application/json"]
+                    ];
+                }
+
+                $session = \Stanford\SecureChatAI\SecureChatLog::rehydrateSession($this, $session_id, $project_id);
+
+                return [
+                    "status"  => 200,
+                    "body"    => json_encode($session),
+                    "headers" => ["Content-Type" => "application/json"]
+                ];
+
             default:
                 return [
                     "status"  => 400,
