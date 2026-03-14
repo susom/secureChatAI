@@ -5,64 +5,62 @@ namespace Stanford\SecureChatAI;
 
 require_once __DIR__ . '/includes/usage_helpers.php';
 
-// Check if demo mode (fake production data)
-$isDemoMode = isset($_GET['demo']) && $_GET['demo'] === 'true';
+$current_pid = $_GET['pid'] ?? null;
 
-// Check if JSON format requested (for AJAX updates)
-$isJsonRequest = isset($_GET['format']) && $_GET['format'] === 'json';
+// AJAX URL for session detail and data refresh (separate endpoint without REDCap chrome)
+$ajaxUrl = $module->getUrl('pages/ProjectUsageAjax.php');
+
+// Gate check: is project usage enabled?
+$usageEnabled = $module->getProjectSetting('enable-project-usage');
+if (!$usageEnabled) {
+    ?>
+    <div class="container mt-5">
+        <div class="alert alert-warning">
+            <h4>AI Usage Dashboard</h4>
+            <p>The project-level usage dashboard is not enabled for this project.</p>
+            <p>An administrator can enable it in the External Module settings for this project.</p>
+        </div>
+    </div>
+    <?php
+    return;
+}
 
 // Get limit from query param or default to 500
 $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 500;
-$limit = min(max($limit, 10), 1000); // Clamp between 10 and 1000
+$limit = min(max($limit, 10), 1000);
 
 // Get date range filters
 $dateStart = isset($_GET['dateStart']) ? $_GET['dateStart'] : null;
 $dateEnd = isset($_GET['dateEnd']) ? $_GET['dateEnd'] : null;
 
 $offset = 0;
-$a = $module->getSecureChatLogs($offset);
-
-// Check if session detail requested (after $module is available)
-$sessionDetailId = isset($_GET['session_id']) ? $_GET['session_id'] : null;
-if ($sessionDetailId) {
-    header('Content-Type: application/json');
-    $session = \Stanford\SecureChatAI\SecureChatLog::rehydrateSession($module, $sessionDetailId, null);
-    echo json_encode($session);
-    exit;
-}
+$a = $module->getProjectSecureChatLogs($current_pid, $offset);
 
 // Collect unique values for filters
 $uniqueModels = [];
-$uniqueProjects = [];
 $uniqueTypes = [];
 $uniqueSessionIds = [];
 
-$allLogs = []; // Store all logs for analytics
+$allLogs = [];
 
-// First pass: collect all logs (don't create rows yet)
-foreach ($a as $index => $v) {
-    $action = $v->getLog();
+foreach ($a as $index => $action) {
 
     // Apply date filtering if specified
     if ($dateStart && $dateEnd && !empty($action['timestamp'])) {
         $logDate = date('Y-m-d', strtotime($action['timestamp']));
         if ($logDate < $dateStart || $logDate > $dateEnd) {
-            continue; // Skip this log
+            continue;
         }
     }
 
-    // Collect all filtered logs
     $allLogs[] = $action;
 
-    // Collect unique values
     if (!empty($action['model'])) $uniqueModels[$action['model']] = true;
-    if (!empty($action['project_id'])) $uniqueProjects[$action['project_id']] = true;
     if (!empty($action['record'])) $uniqueTypes[$action['record']] = true;
     if (!empty($action['session_id'])) $uniqueSessionIds[$action['session_id']] = true;
 }
 
-// Logs are already sorted by database (order by log_id desc)
-// Just create table rows from first 500
+// Create table rows
 $rows = '';
 $tableIndex = 0;
 foreach ($allLogs as $index => $action) {
@@ -70,151 +68,47 @@ foreach ($allLogs as $index => $action) {
         $rows .= createTable($action, $tableIndex);
         $tableIndex++;
     } else {
-        break; // Stop after limit reached
+        break;
     }
 }
 
 // Convert to sorted arrays for dropdowns
 $uniqueModels = array_keys($uniqueModels);
-$uniqueProjects = array_keys($uniqueProjects);
 $uniqueTypes = array_keys($uniqueTypes);
 $uniqueSessionIds = array_keys($uniqueSessionIds);
 sort($uniqueModels);
-sort($uniqueProjects);
 sort($uniqueTypes);
 sort($uniqueSessionIds);
-
-// DEMO MODE: Generate fake production data
-if ($isDemoMode) {
-    $allLogs = [];
-    $fakeModels = ['gpt-4o', 'gpt-4o-mini', 'claude-3.5-sonnet', 'claude-3-haiku', 'gemini-1.5-pro', 'gemini-1.5-flash', 'o1', 'o3-mini', 'gpt-4.1', 'llama-3.3-70b'];
-    $fakeProjects = [123, 456, 789, 234, 567];
-    $fakeTypes = ['chat_completion', 'agent_call', 'embedding', 'chat_completion'];
-    $fakeSessionIds = ['sess_abc123', 'sess_def456', 'sess_ghi789', 'sess_jkl012', 'sess_mno345'];
-    $fakeTools = [
-        ['name' => 'searchRAG', 'arguments' => ['query' => 'patient data'], 'step' => 1],
-        ['name' => 'getUserData', 'arguments' => ['record_id' => '12345'], 'step' => 2],
-        ['name' => 'formatResponse', 'arguments' => ['format' => 'json'], 'step' => 3]
-    ];
-
-    // Generate 5000 fake logs over last 30 days with proper distribution
-    $baseTime = time();
-    for ($i = 0; $i < 5000; $i++) {
-        // Distribute evenly over 30 days, then add randomness
-        $secondsAgo = ($i / 5000) * (30 * 24 * 60 * 60); // Spread evenly
-        $randomOffset = rand(-3600, 3600); // Add up to 1 hour randomness
-        $timestamp = date('Y-m-d H:i:s', $baseTime - $secondsAgo + $randomOffset);
-
-        $model = $fakeModels[array_rand($fakeModels)];
-        $isAgent = rand(0, 100) < 25; // 25% agent mode
-        $promptTokens = rand(100, 3000);
-        $completionTokens = rand(50, 2000);
-        $sessionId = $fakeSessionIds[array_rand($fakeSessionIds)];
-
-        $log = [
-            'id' => 1000000 + $i,
-            'timestamp' => $timestamp,
-            'model' => $model,
-            'project_id' => $fakeProjects[array_rand($fakeProjects)],
-            'record' => $fakeTypes[array_rand($fakeTypes)],
-            'session_id' => $sessionId,
-            'usage' => [
-                'prompt_tokens' => $promptTokens,
-                'completion_tokens' => $completionTokens,
-                'total_tokens' => $promptTokens + $completionTokens
-            ],
-            'temperature' => 0.7,
-            'top_p' => 1.0,
-            'frequency_penalty' => 0.0,
-            'presence_penalty' => 0.0,
-            'messages' => [
-                ['role' => 'user', 'content' => 'Sample query about patient data'],
-                ['role' => 'assistant', 'content' => 'Sample response with clinical information']
-            ],
-            'choices' => [
-                [
-                    'message' => [
-                        'role' => 'assistant',
-                        'content' => 'Sample AI response with detailed analysis and recommendations.',
-                        'tools_used' => $isAgent ? $fakeTools : []
-                    ]
-                ]
-            ]
-        ];
-
-        $allLogs[] = $log;
-    }
-
-    // Recollect unique values
-    $uniqueModels = array_unique($fakeModels);
-    $uniqueProjects = $fakeProjects;
-    $uniqueTypes = array_unique($fakeTypes);
-    $uniqueSessionIds = array_unique($fakeSessionIds);
-
-    // Sort demo logs by ID descending (needed for fake data since it's not from DB)
-    usort($allLogs, function($a, $b) {
-        return intval($b['id']) - intval($a['id']); // DESC order
-    });
-
-    // Create table rows from sorted demo data
-    $rows = '';
-    $tableIndex = 0;
-    foreach ($allLogs as $index => $action) {
-        if ($tableIndex < $limit) {
-            $rows .= createTable($action, $tableIndex);
-            $tableIndex++;
-        } else {
-            break;
-        }
-    }
-}
 
 // Pass data to JavaScript for analytics
 $logsJson = json_encode($allLogs);
 
-// If JSON requested, return data and exit
-if ($isJsonRequest) {
-    header('Content-Type: application/json');
-    echo json_encode([
-        'logs' => $allLogs,
-        'limit' => $limit,
-        'total' => count($allLogs),
-        'dateStart' => $dateStart,
-        'dateEnd' => $dateEnd,
-        'timestamp' => time()
-    ]);
-    exit;
-}
+$safePid = htmlspecialchars($current_pid, ENT_QUOTES, 'UTF-8');
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secure Chat AI Logs</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+<!-- REDCap provides jQuery and Bootstrap via show-header-and-footer -->
+<!-- Only load DataTables and D3 which REDCap does not include -->
+<link rel="stylesheet" href="https://cdn.datatables.net/2.1.3/css/dataTables.dataTables.css" />
+<link rel="stylesheet" href="https://cdn.datatables.net/buttons/3.0.0/css/buttons.dataTables.css" />
+<script src="https://cdn.datatables.net/2.1.3/js/dataTables.js"></script>
+<script src="https://cdn.datatables.net/buttons/3.0.0/js/dataTables.buttons.js"></script>
+<script src="https://cdn.datatables.net/buttons/3.0.0/js/buttons.html5.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
 
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.datatables.net/2.1.3/css/dataTables.dataTables.css" />
-    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/3.0.0/css/buttons.dataTables.css" />
-    <script src="https://cdn.datatables.net/2.1.3/js/dataTables.js"></script>
-    <script src="https://cdn.datatables.net/buttons/3.0.0/js/dataTables.buttons.js"></script>
-    <script src="https://cdn.datatables.net/buttons/3.0.0/js/buttons.html5.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<?php include __DIR__ . '/includes/usage_styles.php'; ?>
 
-    <!-- D3.js for fancy visualizations -->
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
-
-    <?php include __DIR__ . '/includes/usage_styles.php'; ?>
-</head>
-<body>
-
-<div class="container-fluid mt-4">
+<style>
+    /* Constrain to REDCap project chrome content area */
+    .project-usage-wrapper { max-width: 100%; overflow-x: hidden; }
+    .project-usage-wrapper .table { font-size: 0.8rem; }
+    .project-usage-wrapper .query-column,
+    .project-usage-wrapper .response-column,
+    .project-usage-wrapper .tools-column { width: 200px; max-width: 200px; }
+</style>
+<div class="project-usage-wrapper mt-3">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2>Secure Chat AI Monitor</h2>
+        <h2>AI Usage Dashboard - Project <?= $safePid ?></h2>
         <div class="dashboard-controls d-flex gap-2 align-items-center">
             <button class="btn btn-sm btn-outline-primary" id="manualRefreshBtn" title="Refresh now">
                 🔄
@@ -258,12 +152,8 @@ if ($isJsonRequest) {
 
             <!-- Data Info Banner -->
             <div class="alert alert-info mb-3" id="dataBanner">
-                <strong>📊 Analytics Overview</strong> - Showing data from <span id="dataDateRange">all available logs</span>
+                <strong>📊 Project Usage</strong> - Showing data for project <?= $safePid ?> from <span id="dataDateRange">all available logs</span>
                 (<span id="totalLogsCount">-</span> total records)
-                <?php if ($isDemoMode): ?>
-                <span class="badge bg-warning text-dark ms-2">🎭 DEMO MODE - Fake Data</span>
-                <a href="<?= strtok($_SERVER['REQUEST_URI'], '?') ?>" class="btn btn-sm btn-outline-secondary ms-2">Exit Demo</a>
-                <?php endif; ?>
             </div>
 
             <!-- Summary Cards -->
@@ -411,7 +301,7 @@ if ($isJsonRequest) {
         </div>
     </div>
 
-    <!-- Filters Panel -->
+    <!-- Filters Panel (no project filter - already scoped) -->
     <div class="filters-panel">
         <div class="row g-3">
             <div class="col-md-3">
@@ -420,15 +310,6 @@ if ($isJsonRequest) {
                     <option value="">All Models</option>
                     <?php foreach ($uniqueModels as $model): ?>
                         <option value="<?= htmlspecialchars($model, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($model, ENT_QUOTES, 'UTF-8') ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Project ID</label>
-                <select class="form-select form-select-sm" id="projectFilter">
-                    <option value="">All Projects</option>
-                    <?php foreach ($uniqueProjects as $project): ?>
-                        <option value="<?= htmlspecialchars($project, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($project, ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -503,7 +384,29 @@ if ($isJsonRequest) {
 
     </div><!-- End Tab Content -->
 
-</div><!-- End Container -->
+    <!-- Phase 2/3 Stub Cards -->
+    <div class="row mt-4 mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body text-center text-muted">
+                    <h5 class="card-title">API Configuration</h5>
+                    <p class="card-text">Project API key management and endpoint configuration.</p>
+                    <span class="badge bg-secondary">Coming Soon</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body text-center text-muted">
+                    <h5 class="card-title">Usage Limits</h5>
+                    <p class="card-text">Monthly token and cost limits with alerts.</p>
+                    <span class="badge bg-secondary">Coming Soon</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div><!-- End Wrapper -->
 
 <!-- D3 Tooltip -->
 <div class="tooltip-d3" id="d3-tooltip"></div>
@@ -512,8 +415,8 @@ if ($isJsonRequest) {
     // Pass PHP data to JavaScript
     const logsData = <?php echo $logsJson; ?>;
     window.logsData = logsData;
+    // AJAX endpoint (separate page without REDCap header/footer)
+    window.USAGE_AJAX_URL = '<?= $ajaxUrl ?>';
 </script>
 <script src="<?= $module->getUrl('pages/includes/usage_analytics.js') ?>"></script>
 <script src="<?= $module->getUrl('pages/includes/usage_table.js') ?>"></script>
-</body>
-</html>

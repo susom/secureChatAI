@@ -24,7 +24,14 @@
     "enable-every-page-hooks-on-system-pages": false,
     "enable-no-auth-logging": true,
     "links": {
-        "project": [],
+        "project": [
+            {
+                "name": "AI Usage Dashboard",
+                "icon": "fas fa-chart-bar",
+                "url": "pages/ProjectUsage.php",
+                "show-header-and-footer": true
+            }
+        ],
         "control-center": [
             {
                 "name": "SecureChat Log Visualization",
@@ -309,6 +316,32 @@
             "name": "<b>Enable Debug Logging (system-wide)</b><i>(optional)</i> Requires installation and configuration of emLogger",
             "required": false,
             "type": "checkbox"
+        }
+    ],
+    "project-settings": [
+        {
+            "key": "enable-project-usage",
+            "name": "<b>Enable Project Usage Dashboard</b><br><i>Shows AI usage analytics for this project</i>",
+            "type": "checkbox",
+            "required": false
+        },
+        {
+            "key": "project-api-key",
+            "name": "<b>Project API Key</b><br><i>(Phase 2 - not yet active)</i> Dedicated API key for this project's AI usage",
+            "type": "text",
+            "required": false
+        },
+        {
+            "key": "project-monthly-token-limit",
+            "name": "<b>Monthly Token Limit</b><br><i>(Phase 3 - not yet active)</i> Maximum tokens per month for this project",
+            "type": "text",
+            "required": false
+        },
+        {
+            "key": "project-monthly-cost-limit",
+            "name": "<b>Monthly Cost Limit ($)</b><br><i>(Phase 3 - not yet active)</i> Maximum estimated cost per month for this project",
+            "type": "text",
+            "required": false
         }
     ],
     "compatibility": {
