@@ -87,6 +87,172 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return SecureChatLog::getLogsBySession($this, $session_id, $project_id);
     }
 
+    /**
+     * Get logs for a specific project.
+     * Fetches all logs and filters by the project_id stored in the JSON message payload,
+     * since the EM framework's project_id column may not match (logs written from system context).
+     * @param int $project_id
+     * @param int $offset
+     * @return array Decoded log data arrays (same format as SecureChatLog::getLog())
+     */
+    public function getProjectSecureChatLogs($project_id, $offset)
+    {
+        // Cannot use SecureChatLog or ASEMLO here because $module->queryLogs()
+        // auto-filters by project_id when called from project context. Logs written
+        // from system context have NULL in the EM project_id column even though the
+        // JSON payload contains the correct project_id. We bypass the EM framework
+        // entirely and load raw data.
+        $pid = intval($project_id);
+        $offset = intval($offset);
+        $sql = "SELECT log_id, timestamp, record, message
+                FROM redcap_external_modules_log
+                WHERE external_module_id = (
+                    SELECT external_module_id FROM redcap_external_modules
+                    WHERE directory_prefix = ?
+                    LIMIT 1
+                )
+                AND record IN ('SecureChatLog', 'SecureChatLogError')
+                AND message LIKE ?
+                ORDER BY log_id DESC
+                LIMIT 1000 OFFSET ?";
+        $pattern = '%"project_id":' . $pid . '%';
+        $prefix = $this->PREFIX;
+        $result = $this->query($sql, [$prefix, $pattern, $offset]);
+
+        $logs = [];
+        while ($row = $result->fetch_assoc()) {
+            $decoded = json_decode($row['message'], true);
+            if ($decoded === null) continue;
+            // Verify project_id actually matches (LIKE is broad)
+            $logPid = $decoded['project_id'] ?? null;
+            if (intval($logPid) !== $pid) continue;
+            $decoded['timestamp'] = $row['timestamp'];
+            $decoded['id'] = $row['log_id'];
+            $decoded['record'] = $row['record'];
+            $logs[] = $decoded;
+        }
+        return $logs;
+    }
+
+    /**
+     * Rehydrate a session by session_id using raw SQL (bypasses EM framework project scoping).
+     * @param string $session_id
+     * @param int $project_id
+     * @return array Session object with 'messages', 'metadata', 'stats'
+     */
+    public function rehydrateProjectSession($session_id, $project_id)
+    {
+        $pid = intval($project_id);
+        $prefix = $this->PREFIX;
+
+        // Find all logs for this session via the promoted session_id parameter
+        $sql = "SELECT l.log_id, l.timestamp, l.record, l.message
+                FROM redcap_external_modules_log l
+                JOIN redcap_external_modules_log_parameters p
+                    ON l.log_id = p.log_id AND p.name = 'session_id' AND p.value = ?
+                WHERE l.external_module_id = (
+                    SELECT external_module_id FROM redcap_external_modules
+                    WHERE directory_prefix = ? LIMIT 1
+                )
+                AND l.record IN ('SecureChatLog', 'SecureChatLogError')
+                ORDER BY l.log_id ASC";
+        $result = $this->query($sql, [$session_id, $prefix]);
+
+        $logs = [];
+        while ($row = $result->fetch_assoc()) {
+            $decoded = json_decode($row['message'], true);
+            if ($decoded === null) continue;
+            if (intval($decoded['project_id'] ?? 0) !== $pid) continue;
+            $decoded['timestamp'] = $row['timestamp'];
+            $decoded['id'] = $row['log_id'];
+            $decoded['record'] = $row['record'];
+            $logs[] = $decoded;
+        }
+
+        // Fallback: scan JSON message for pre-promotion logs
+        if (empty($logs)) {
+            $sql2 = "SELECT log_id, timestamp, record, message
+                     FROM redcap_external_modules_log
+                     WHERE external_module_id = (
+                         SELECT external_module_id FROM redcap_external_modules
+                         WHERE directory_prefix = ? LIMIT 1
+                     )
+                     AND record IN ('SecureChatLog', 'SecureChatLogError')
+                     AND message LIKE ?
+                     ORDER BY log_id ASC
+                     LIMIT 1000";
+            $pattern = '%"session_id":"' . preg_replace('/[^a-zA-Z0-9_-]/', '', $session_id) . '"%';
+            $result2 = $this->query($sql2, [$prefix, $pattern]);
+            while ($row = $result2->fetch_assoc()) {
+                $decoded = json_decode($row['message'], true);
+                if ($decoded === null) continue;
+                if (intval($decoded['project_id'] ?? 0) !== $pid) continue;
+                if (($decoded['session_id'] ?? '') !== $session_id) continue;
+                $decoded['timestamp'] = $row['timestamp'];
+                $decoded['id'] = $row['log_id'];
+                $decoded['record'] = $row['record'];
+                $logs[] = $decoded;
+            }
+        }
+
+        if (empty($logs)) {
+            return [
+                'session_id' => $session_id,
+                'messages' => [],
+                'metadata' => [],
+                'stats' => ['total_turns' => 0, 'total_tokens' => 0, 'models_used' => []]
+            ];
+        }
+
+        // Build conversation from logs (same logic as SecureChatLog::rehydrateSession)
+        $messages = [];
+        $models = [];
+        $total_tokens = 0;
+        $first_timestamp = null;
+        $last_timestamp = null;
+
+        foreach ($logs as $index => $log) {
+            if (!empty($log['error'])) continue;
+
+            if (!empty($log['user_message'])) {
+                $messages[] = [
+                    'role' => 'user',
+                    'content' => $log['user_message'],
+                    'turn' => $index + 1
+                ];
+            }
+            if (!empty($log['assistant_response'])) {
+                $messages[] = [
+                    'role' => 'assistant',
+                    'content' => $log['assistant_response'],
+                    'turn' => $index + 1,
+                    'tools_used' => $log['tools_used'] ?? null
+                ];
+            }
+            if (!empty($log['model'])) $models[$log['model']] = true;
+            if (!empty($log['usage']['total_tokens'])) $total_tokens += $log['usage']['total_tokens'];
+            if ($first_timestamp === null) $first_timestamp = $log['timestamp'];
+            $last_timestamp = $log['timestamp'];
+        }
+
+        return [
+            'session_id' => $session_id,
+            'messages' => $messages,
+            'metadata' => [
+                'project_id' => $pid,
+                'start_time' => $first_timestamp,
+                'end_time' => $last_timestamp,
+                'duration_seconds' => $first_timestamp && $last_timestamp ?
+                    strtotime($last_timestamp) - strtotime($first_timestamp) : 0
+            ],
+            'stats' => [
+                'total_turns' => count($messages) / 2,
+                'total_tokens' => $total_tokens,
+                'models_used' => array_keys($models)
+            ]
+        ];
+    }
+
     private function filterDefaultParamsForModel($model, $params)
     {
         // Embedding models don't use chat defaultParams
