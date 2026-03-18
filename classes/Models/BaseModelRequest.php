@@ -82,7 +82,8 @@ abstract class BaseModelRequest implements ModelInterface {
         $dnsOverrideIP = $this->module->getSystemSetting('apim_dns_override_ip');
         if (!empty($dnsOverrideIP)) {
             curl_setopt($ch, CURLOPT_RESOLVE, [
-                "apim.stanfordhealthcare.org:443:$dnsOverrideIP"
+                "apim.stanfordhealthcare.org:443:$dnsOverrideIP",
+                "aihubapi.stanfordhealthcare.org:443:$dnsOverrideIP"
             ]);
         }
 
