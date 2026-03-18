@@ -802,17 +802,29 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             case 'gpt-5':
             case 'llama3370b':
             case 'llama-Maverick':
+            case 'chat':
+            case 'gpt-4-1-nano':
+            case 'gpt-5-nano':
+            case 'grok-3-mini':
+            case 'llama-4-scout':
+            case 'o4-mini':
                 $filteredParams = $this->filterDefaultParamsForModel($model, $params);
                 $generic = new GenericModelRequest($this, $modelConfig, [], $model);
                 $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
                 $this->emDebug("RAW GenericModelRequest API RESPONSE", $responseData);
                 break;
             case 'claude':
+            case 'claude-sonnet-3.5':
+            case 'claude-sonnet-3.7':
+            case 'claude-haiku-4.5':
+            case 'claude-opus-4':
+            case 'claude-sonnet-4':
                 $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams, $model);
                 $responseData = $claude->sendRequest($api_endpoint, $filteredParams);
                 break;
             case 'gemini20flash':
             case 'gemini25pro':
+            case 'gemini-flash-lite':
                 $gemini = new GeminiModelRequest($this, $modelConfig, $this->defaultParams, $model);
                 $responseData = $gemini->sendRequest($api_endpoint, $filteredParams);
                 break;
@@ -1175,6 +1187,48 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'output_max' => 128000,
                 'param' => 'max_tokens',
                 'buffer' => 2000
+            ],
+            'o4-mini' => [
+                'context' => 200000,
+                'output_max' => 100000,
+                'param' => 'max_completion_tokens',
+                'buffer' => 25000
+            ],
+            'claude' => [
+                'context' => 200000,
+                'output_max' => 8192,
+                'param' => 'max_tokens',
+                'buffer' => 2000
+            ],
+            'claude-sonnet-3.5' => [
+                'context' => 200000,
+                'output_max' => 8192,
+                'param' => 'max_tokens',
+                'buffer' => 2000
+            ],
+            'claude-sonnet-3.7' => [
+                'context' => 200000,
+                'output_max' => 8192,
+                'param' => 'max_tokens',
+                'buffer' => 2000
+            ],
+            'claude-haiku-4.5' => [
+                'context' => 200000,
+                'output_max' => 8192,
+                'param' => 'max_tokens',
+                'buffer' => 2000
+            ],
+            'claude-opus-4' => [
+                'context' => 200000,
+                'output_max' => 32000,
+                'param' => 'max_tokens',
+                'buffer' => 2000
+            ],
+            'claude-sonnet-4' => [
+                'context' => 200000,
+                'output_max' => 16000,
+                'param' => 'max_tokens',
+                'buffer' => 2000
             ]
         ];
         $spec = $modelSpecs[$model] ?? null;
@@ -1251,7 +1305,7 @@ private function toOpenAIToolsShape(array $tools): array
             return $response;
         }
 
-        if ($model === 'claude') {
+        if (str_starts_with($model, 'claude')) {
             $normalized['content'] = $response['content'][0]['text'] ?? '';
             $normalized['role'] = $response['role'] ?? 'assistant';
             $normalized['model'] = $response['model'] ?? 'claude';
@@ -1261,7 +1315,8 @@ private function toOpenAIToolsShape(array $tools): array
                 'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
             ];
         } elseif (in_array($model, [
-            'o1', 'o3-mini', 'gpt-4o', 'gpt-5', 'llama3370b', 'gpt-4.1', 'llama-Maverick', 'deepseek'
+            'o1', 'o3-mini', 'gpt-4o', 'gpt-5', 'llama3370b', 'gpt-4.1', 'llama-Maverick', 'deepseek',
+            'chat', 'gpt-4-1-nano', 'gpt-5-nano', 'grok-3-mini', 'llama-4-scout', 'o4-mini'
         ])) {
             $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
             $decoded = json_decode($normalized['content'], true);
@@ -1277,7 +1332,7 @@ private function toOpenAIToolsShape(array $tools): array
                 'total_tokens' => $response['usage']['total_tokens'] ?? 0
             ];
         } elseif (in_array($model, [
-             'gemini20flash',  'gemini25pro'
+             'gemini20flash', 'gemini25pro', 'gemini-flash-lite'
         ])) {
             $contentParts = [];
             foreach ($response as $chunk) {

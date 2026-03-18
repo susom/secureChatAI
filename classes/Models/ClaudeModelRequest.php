@@ -5,53 +5,58 @@ class ClaudeModelRequest extends BaseModelRequest
 {
     public function sendRequest(string $apiEndpoint, array $params): array
     {
-        // Format messages to Claude's expected prompt_text
-        $prompt_text = isset($params['messages'])
-            ? $this->formatMessagesForClaude($params['messages'])
-            : ($params['prompt_text'] ?? '');
-
-        if (empty($prompt_text)) {
-            throw new \Exception('Claude API requires prompt_text in the request body.');
+        if (empty($params['messages'])) {
+            throw new \Exception('Claude API requires messages in the request body.');
         }
 
-        // Claude's tuning parameters must be nested under 'parameters'
-        $parameters = [
-            "temperature" => $params['temperature'] ?? $this->defaultParams['temperature'],
-            "top_p"       => $params['top_p'] ?? $this->defaultParams['top_p'],
-            "max_tokens"  => $params['max_tokens'] ?? $this->defaultParams['max_tokens']
-        ];
+        // Extract system messages into top-level system param (Anthropic Messages API format)
+        $system = '';
+        $messages = [];
+        foreach ($params['messages'] as $msg) {
+            if (($msg['role'] ?? '') === 'system') {
+                $system .= (empty($system) ? '' : "\n\n") . trim($msg['content']);
+            } else {
+                // Anthropic expects content as string or array of content blocks
+                $messages[] = [
+                    'role' => $msg['role'],
+                    'content' => $msg['content']
+                ];
+            }
+        }
 
         $payload = [
-            "model_id"    => $this->modelId,
-            "prompt_text" => $prompt_text,
-            "parameters"  => $parameters
+            'anthropic_version' => 'bedrock-2023-05-31',
+            'messages' => $messages,
+            'max_tokens' => (int)($params['max_tokens'] ?? $this->defaultParams['max_tokens'] ?? 4096),
         ];
+
+        if (!empty($system)) {
+            $payload['system'] = $system;
+        }
+
+        // Optional parameters
+        if (isset($params['temperature']) || isset($this->defaultParams['temperature'])) {
+            $payload['temperature'] = (float)($params['temperature'] ?? $this->defaultParams['temperature']);
+        }
+        if (isset($params['top_p']) || isset($this->defaultParams['top_p'])) {
+            $payload['top_p'] = (float)($params['top_p'] ?? $this->defaultParams['top_p']);
+        }
 
         $postfields = json_encode($payload);
 
-        // Use API key in header (e.g. Ocp-Apim-Subscription-Key)
         $headers = [
             "Content-Type: application/json",
             "{$this->auth_key_name}: {$this->apiKey}"
         ];
 
-        $this->module->emDebug("Sending ClaudeModelRequest", [
-            'endpoint'   => $apiEndpoint,
-            'postfields' => $payload
+        $this->module->emDebug("Sending ClaudeModelRequest (Bedrock)", [
+            'endpoint' => $apiEndpoint,
+            'model_id' => $this->modelId,
+            'message_count' => count($messages),
+            'has_system' => !empty($system)
         ]);
 
         $rawResponse = $this->executeAPICall($apiEndpoint, $postfields, $headers);
         return json_decode($rawResponse, true);
-    }
-
-    private function formatMessagesForClaude(array $messages): string
-    {
-        $formatted = [];
-        foreach ($messages as $message) {
-            $role = ucfirst($message['role']);
-            $content = trim($message['content']);
-            $formatted[] = "{$role}: {$content}";
-        }
-        return implode("\n\n", $formatted);
     }
 }
