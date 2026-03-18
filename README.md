@@ -4,7 +4,7 @@ SecureChatAI is a **service-oriented REDCap External Module** that provides a un
 
 It acts as the **foundational AI runtime layer** for the REDCap AI ecosystem, enabling chatbots, RAG pipelines, background jobs, and agentic workflows to access multiple LLM providers through a single, auditable interface.
 
-**Requires VPN connection to SOM / SHC.**
+**Requires network access to Stanford AI endpoints** (via AIHub gateway or legacy APIM; VPN may be required depending on environment).
 
 ---
 
@@ -73,20 +73,28 @@ This separation ensures:
 ## Supported Model Categories
 
 ### Chat / Completion Models
-- `gpt-4o`
-- `gpt-4.1`
-- `o1`, `o3-mini`
-- `claude`
+
+**Via AIHub — Azure AI Foundry:**
+- `chat`, `gpt-4-1-nano`, `gpt-5-nano`, `grok-3-mini`, `llama-4-scout`, `o4-mini`
+
+**Via AIHub — AWS Bedrock:**
+- `claude-sonnet-3.5`, `claude-sonnet-3.7`, `claude-haiku-4.5`, `claude-opus-4`, `claude-sonnet-4`
+
+**Via AIHub — Google Vertex AI:**
+- `gemini-flash-lite`
+
+**Via legacy APIM (or AIHub Azure AI Foundry):**
+- `gpt-4o`, `gpt-4.1`, `o1`, `o3-mini`, `gpt-5`
+- `llama3370b`, `llama-Maverick`, `deepseek`
+- `claude` (legacy APIM proxy — use Bedrock aliases for AIHub)
 - `gemini20flash`, `gemini25pro`
-- `llama3370b`, `llama-Maverick`
-- `deepseek`
 
 ### Embeddings
-- `ada-002`
+- `ada-002`, `text-embedding-3-small`
 
 ### Audio / Speech
 - `whisper`
-- `gpt-4o-tts`
+- `gpt-4o-tts`, `tts`
 
 ---
 
@@ -99,7 +107,7 @@ This separation ensures:
    - Applies defaults
    - Filters unsupported parameters
    - Selects the correct model adapter
-3. **Model request is executed** via Stanford-approved endpoint.
+3. **Model request is executed** via Stanford AIHub gateway (AWS Bedrock, Google Vertex AI, or Azure AI Foundry) or legacy APIM endpoint.
 4. **Response is normalized** into a common format.
 5. **Usage and metadata are logged** for audit and monitoring.
 6. **Normalized response is returned** to the caller.
@@ -370,6 +378,10 @@ curl -X POST "https://redcap.stanford.edu/api/" \
 Configured entirely via **System Settings**:
 
 - **Model registry** (API endpoints, tokens, aliases)
+  - Each model entry specifies: alias, model ID, endpoint URL, API token, auth header name, and input variable name
+  - **AIHub models** use `api-key` as the auth header name and the AIHub subscription primary key as the API token
+  - **Legacy APIM models** use `subscription-key` or `Ocp-Apim-Subscription-Key` as the auth header name
+  - Endpoint URLs include the full path (model ID / deployment ID baked into the URL for AIHub)
 - **Default model selection**
 - **Parameter defaults** (temperature, top_p, max_tokens, etc.)
 - **Agent mode controls**:
