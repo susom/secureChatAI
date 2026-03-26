@@ -27,6 +27,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     private $guzzleClient = null;
     private $guzzleTimeout = 5.0;
     private array $modelConfig = [];
+    private bool $initialized = false;
+    private ?EncoderProvider $encoderProvider = null;
+    public ?string $dnsOverrideIP = null;
 
     public function __construct()
     {
@@ -35,6 +38,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     private function initSecureChatAI()
     {
+        if ($this->initialized) return;
         // Set default LLM model parameters
         $this->defaultParams = [
             'temperature' => (float)$this->getSystemSetting('gpt-temperature') ?: 0.7,
@@ -68,6 +72,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $timeout = $this->getSystemSetting('guzzle-timeout') ? (float)(strip_tags($this->getSystemSetting('guzzle-timeout'))) : $this->getGuzzleTimeout();
         $this->setGuzzleTimeout($timeout);
         $this->guzzleClient = $this->getGuzzleClient();
+
+        // Cache DNS override so BaseModelRequest doesn't query DB on every HTTP call
+        $this->dnsOverrideIP = $this->getSystemSetting('apim_dns_override_ip') ?: null;
+
+        $this->initialized = true;
     }
 
     public function getSecureChatLogs($offset)
@@ -916,12 +925,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     'action'       => $tool['redcap']['action'],
                 ], $arguments);
 
-                $client = new \GuzzleHttp\Client([
-                    'timeout' => 10
-                ]);
+                $client = $this->guzzleClient;
 
                 $response = $client->post($apiUrl, [
-                    'form_params' => $payload
+                    'form_params' => $payload,
+                    'timeout'     => 10,
                 ]);
 
                 $body = json_decode((string) $response->getBody(), true);
@@ -1157,9 +1165,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     }
 
     private function estimateTokens(string $text, string $model): int {
-        $provider = new EncoderProvider();  // Caches encoders automatically
-        $encoder = $provider->getForModel($model);  // Maps 'o1', 'gpt-4.1' → cl100k_base
-        return count($encoder->encode($text));  // Returns token count
+        $this->encoderProvider ??= new EncoderProvider();
+        $encoder = $this->encoderProvider->getForModel($model);
+        return count($encoder->encode($text));
     }
 
     private function computeDynamicMaxTokens(string $model, string $prompt): array {
