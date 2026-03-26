@@ -218,51 +218,63 @@ class ASEMLO
         if ($id = $this->getId()) {
             // Updating an existing log entry
             $this->dirty_keys = array_unique($this->dirty_keys);
+
+            // Separate dirty keys into primary-column updates, param upserts, and param deletes
+            $paramUpserts  = []; // [ [name, value], ... ]
+            $paramDeletes  = []; // [ name, ... ]
+
             foreach ($this->dirty_keys as $k) {
                 if (in_array($k, self::PRIMARY_UPDATABLE_COLUMNS)) {
-                    // We can update this value
                     $v = $this->getValue($k);
                     $sql = "update redcap_external_modules_log set " . $k . "=? where log_id=?";
-                    $params = [$v, $id];
-                    $result = $this->module->query($sql, $params);
+                    $result = $this->module->query($sql, [$v, $id]);
                     if ($result) {
-                        // $this->module->emDebug("Updated $id: set $k to $v");
                         $this->logChange(["update", $k, $v]);
                     } else {
-                        $this->module->emDebug("Primary update failed: ", $sql, $params, $result);
+                        $this->module->emDebug("Primary update failed: ", $sql, [$v, $id], $result);
                     }
                 } elseif (in_array($k, self::PRIMARY_FIXED_COLUMNS)) {
-                    // We cannot update this kind of column
                     $this->module->emError("You cannot update column $k in this object");
                 } else {
-                    // It is a parameter
                     $v = $this->getValue($k);
-                    if (is_null($v) or $v == "") {
-                        // delete the parameter
-                        $sql = "delete from redcap_external_modules_log_parameters where log_id=? and name=? limit 1";
-                        $params = [$id, $k];
-                        $result = $this->module->query($sql, $params);
-                        if ($result) {
-                            $this->logChange(["delete parameter", $k]);
-                            $this->module->emDebug("Deleted parameter $k for log id $id");
-                        } else {
-                            $this->module->emError("Delete parameter $k failed for log it $id", $sql,$params,$result);
-                        }
+                    if (is_null($v) || $v === "") {
+                        $paramDeletes[] = $k;
                     } else {
-                        // upsert/insert parameter
-                        $sql = "INSERT INTO redcap_external_modules_log_parameters (log_id,name,value) " .
-                            " VALUES (?,?,?) ON DUPLICATE KEY UPDATE value=?";
-                        $params = [$id, $k, $v, $v];
-                        $result = $this->module->query($sql, $params);
-                        if ($result) {
-                            $this->logChange(['update', $k, $v]);
-                            // $this->module->emDebug("Updated $id - set $k to $v");
-                        } else {
-                            $this->module->emDebug("Parameter update failed: ", $sql, $params, $result);
-                        }
+                        $paramUpserts[] = [$k, $v];
                     }
                 }
             }
+
+            // Batch parameter upserts into a single INSERT ... ON DUPLICATE KEY UPDATE
+            if (!empty($paramUpserts)) {
+                $placeholders = implode(',', array_fill(0, count($paramUpserts), '(?,?,?)'));
+                $sql = "INSERT INTO redcap_external_modules_log_parameters (log_id,name,value) " .
+                    "VALUES $placeholders ON DUPLICATE KEY UPDATE value=VALUES(value)";
+                $params = [];
+                foreach ($paramUpserts as [$k, $v]) {
+                    $params[] = $id;
+                    $params[] = $k;
+                    $params[] = $v;
+                    $this->logChange(['update', $k, $v]);
+                }
+                $result = $this->module->query($sql, $params);
+                if (!$result) {
+                    $this->module->emDebug("Batch parameter upsert failed", $sql, $params);
+                }
+            }
+
+            // Individual deletes (rare; no multi-row DELETE shortcut without IN list complexity)
+            foreach ($paramDeletes as $k) {
+                $sql = "delete from redcap_external_modules_log_parameters where log_id=? and name=? limit 1";
+                $result = $this->module->query($sql, [$id, $k]);
+                if ($result) {
+                    $this->logChange(["delete parameter", $k]);
+                    $this->module->emDebug("Deleted parameter $k for log id $id");
+                } else {
+                    $this->module->emError("Delete parameter $k failed for log id $id");
+                }
+            }
+
             // Clear Dirty Keys - All Processed
             $this->dirty_keys = [];
         } else {

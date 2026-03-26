@@ -87,8 +87,9 @@ class SecureChatLog extends ASEMLO
             return [];
         }
 
-        // Try indexed parameter lookup first (for logs saved after session_id promotion)
-        $sql = "SELECT l.log_id FROM redcap_external_modules_log l
+        // Fetch all needed columns in one query — avoids N+1 object instantiation per row
+        $sql = "SELECT l.log_id, l.message, l.timestamp, l.record
+                FROM redcap_external_modules_log l
                 JOIN redcap_external_modules_log_parameters p
                     ON l.log_id = p.log_id AND p.name = 'session_id' AND p.value = ?
                 WHERE l.record IN (?, ?)";
@@ -107,22 +108,32 @@ class SecureChatLog extends ASEMLO
 
         $results = [];
         while ($row = $result->fetch_assoc()) {
-            $obj = new self($module, $row['log_id']);
-            $results[] = $obj->getLog();
+            $decoded = json_decode($row['message'], true) ?: [];
+            $decoded['timestamp'] = $row['timestamp'];
+            $decoded['id']        = $row['log_id'];
+            $decoded['record']    = $row['record'];
+            $results[] = $decoded;
         }
 
-        // Fallback: scan JSON message blob for older logs that pre-date parameter promotion
+        // Fallback: SQL scan for older logs whose session_id lives only in the JSON message blob
         if (empty($results)) {
-            $module->emDebug("Parameter lookup empty, falling back to JSON scan for session_id: $session_id");
-            $all_logs = $project_id !== null
-                ? self::getLogs($module, $project_id, 0)
-                : self::getAllLogs($module, 0);
-
-            foreach ($all_logs as $log_obj) {
-                $log_data = $log_obj->getLog();
-                if (isset($log_data['session_id']) && $log_data['session_id'] === $session_id) {
-                    $results[] = $log_data;
-                }
+            $module->emDebug("Parameter lookup empty, falling back to SQL scan for session_id: $session_id");
+            $like_pattern   = '%"session_id":"' . addslashes($session_id) . '"%';
+            $fallback_sql   = "SELECT l.log_id, l.message, l.timestamp, l.record
+                               FROM redcap_external_modules_log l
+                               WHERE l.record IN (?, ?) AND l.message LIKE ?";
+            $fallback_params = ['SecureChatLog', 'SecureChatLogError', $like_pattern];
+            if ($project_id !== null) {
+                $fallback_sql   .= " AND l.project_id = ?";
+                $fallback_params[] = $project_id;
+            }
+            $fallback_result = $module->query($fallback_sql, $fallback_params);
+            while ($row = $fallback_result->fetch_assoc()) {
+                $decoded = json_decode($row['message'], true) ?: [];
+                $decoded['timestamp'] = $row['timestamp'];
+                $decoded['id']        = $row['log_id'];
+                $decoded['record']    = $row['record'];
+                $results[] = $decoded;
             }
         }
 
