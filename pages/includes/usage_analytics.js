@@ -3,15 +3,36 @@
 // ============================================================
 // Contract: Host page must define `const logsData` before this script loads
 
-// Model pricing (per 1M tokens)
+// Model pricing (per 1M tokens). Base rates unless noted.
 const MODEL_PRICING = {
+    // Azure AI Foundry (base)
+    'gpt-5.4-pro': { prompt: 30, completion: 180 },
+    'gpt-5.4': { prompt: 2.5, completion: 15 },
+    'gpt-5.2': { prompt: 1.75, completion: 14 },
+    'gpt-5-mini': { prompt: 0.25, completion: 2.0 },
+    'gpt-5-nano': { prompt: 0.05, completion: 0.4 },
+
+    // Google Vertex AI (base)
+    'gemini-3.1-pro': { prompt: 2.0, completion: 12.0 },
+    'medlm': { prompt: 2.0, completion: 12.0 },
+    'gemini-3-flash': { prompt: 0.5, completion: 3.0 },
+    'gemini-2.5-pro': { prompt: 1.25, completion: 10.0 },
+    'gemini-2.5-flash': { prompt: 0.3, completion: 2.5 },
+    'gemini-2.5-lite': { prompt: 0.1, completion: 0.4 },
+
+    // AWS Bedrock (base)
+    'claude-opus-4.6': { prompt: 5.0, completion: 25.0 },
+    'claude-opus-4.5': { prompt: 5.0, completion: 25.0 },
+    'claude-sonnet-4.6': { prompt: 3.0, completion: 15.0 },
+    'claude-haiku-4.5': { prompt: 1.0, completion: 5.0 },
+
+    // Legacy/other models (keep for continuity)
     'gpt-4': { prompt: 30, completion: 60 },
     'gpt-4o': { prompt: 2.5, completion: 10 },
     'gpt-4o-mini': { prompt: 0.15, completion: 0.6 },
     'gpt-4.1': { prompt: 30, completion: 60 },
     'o1': { prompt: 15, completion: 60 },
     'o3-mini': { prompt: 1.1, completion: 4.4 },
-    'gpt-5': { prompt: 50, completion: 100 },
     'claude-3.5-sonnet': { prompt: 3, completion: 15 },
     'claude-3-opus': { prompt: 15, completion: 75 },
     'claude-3-haiku': { prompt: 0.25, completion: 1.25 },
@@ -23,8 +44,72 @@ const MODEL_PRICING = {
     'default': { prompt: 1, completion: 2 }
 };
 
+const MODEL_ALIASES = [
+    { match: /^gpt-5\.4-pro/, key: 'gpt-5.4-pro' },
+    { match: /^gpt-5-4-pro/, key: 'gpt-5.4-pro' },
+    { match: /^gpt-5\.4/, key: 'gpt-5.4' },
+    { match: /^gpt-5-4/, key: 'gpt-5.4' },
+    { match: /^gpt-5\.2/, key: 'gpt-5.2' },
+    { match: /^gpt-5-2/, key: 'gpt-5.2' },
+    { match: /^gpt-5-mini/, key: 'gpt-5-mini' },
+    { match: /^gpt-5-nano/, key: 'gpt-5-nano' },
+    { match: /^gpt-5/, key: 'gpt-5.2' }, // default GPT-5 family to 5.2 base rate
+
+    { match: /^gpt-4o/, key: 'gpt-4o' },
+    { match: /^gpt-4\.1/, key: 'gpt-4.1' },
+    { match: /^gpt-4-1/, key: 'gpt-4.1' },
+    { match: /^gpt-4/, key: 'gpt-4' },
+
+    { match: /^o3-mini/, key: 'o3-mini' },
+    { match: /^o1/, key: 'o1' },
+
+    { match: /^gemini-3\.1-pro/, key: 'gemini-3.1-pro' },
+    { match: /^gemini-3-1-pro/, key: 'gemini-3.1-pro' },
+    { match: /^gemini-3.*flash/, key: 'gemini-3-flash' },
+    { match: /^gemini-2\.5-pro/, key: 'gemini-2.5-pro' },
+    { match: /^gemini-2-5-pro/, key: 'gemini-2.5-pro' },
+    { match: /^gemini-2\.5-flash/, key: 'gemini-2.5-flash' },
+    { match: /^gemini-2-5-flash/, key: 'gemini-2.5-flash' },
+    { match: /^gemini-2\.5-lite/, key: 'gemini-2.5-lite' },
+    { match: /^gemini-2-5-lite/, key: 'gemini-2.5-lite' },
+    { match: /^gemini-1\.5-pro/, key: 'gemini-1.5-pro' },
+    { match: /^gemini-1-5-pro/, key: 'gemini-1.5-pro' },
+    { match: /^gemini-1\.5-flash/, key: 'gemini-1.5-flash' },
+    { match: /^gemini-1-5-flash/, key: 'gemini-1.5-flash' },
+    { match: /medlm/, key: 'medlm' },
+
+    { match: /^claude-opus-4\.6/, key: 'claude-opus-4.6' },
+    { match: /^claude-opus-4\.5/, key: 'claude-opus-4.5' },
+    { match: /^claude-sonnet-4\.6/, key: 'claude-sonnet-4.6' },
+    { match: /^claude-haiku-4\.5/, key: 'claude-haiku-4.5' },
+    { match: /^claude-3\.5-sonnet/, key: 'claude-3.5-sonnet' },
+    { match: /^claude-3-5-sonnet/, key: 'claude-3.5-sonnet' },
+    { match: /^claude-3-opus/, key: 'claude-3-opus' },
+    { match: /^claude-3-haiku/, key: 'claude-3-haiku' }
+];
+
+function normalizeModelName(model) {
+    if (!model) return 'default';
+    const cleaned = model
+        .toLowerCase()
+        .replace(/[_\s]+/g, '-');
+
+    if (MODEL_PRICING[cleaned]) {
+        return cleaned;
+    }
+
+    for (const alias of MODEL_ALIASES) {
+        if (alias.match.test(cleaned)) {
+            return alias.key;
+        }
+    }
+
+    return cleaned;
+}
+
 function calculateCost(model, promptTokens, completionTokens) {
-    const pricing = MODEL_PRICING[model] || MODEL_PRICING['default'];
+    const normalizedModel = normalizeModelName(model);
+    const pricing = MODEL_PRICING[normalizedModel] || MODEL_PRICING['default'];
     const promptCost = (promptTokens / 1000000) * pricing.prompt;
     const completionCost = (completionTokens / 1000000) * pricing.completion;
     return promptCost + completionCost;
@@ -105,8 +190,9 @@ function processLogsData(logs) {
         const promptTokens = log.usage?.prompt_tokens || 0;
         const completionTokens = log.usage?.completion_tokens || 0;
         const totalTokens = log.usage?.total_tokens || 0;
-        const model = log.model || 'unknown';
-        const cost = calculateCost(model, promptTokens, completionTokens);
+        const rawModel = log.model || 'unknown';
+        const model = normalizeModelName(rawModel);
+        const cost = calculateCost(rawModel, promptTokens, completionTokens);
 
         totalCalls++;
         totalTokensAllTime += totalTokens;
