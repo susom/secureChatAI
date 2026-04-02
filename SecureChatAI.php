@@ -418,21 +418,36 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     {
         if (empty($pid)) return [];
 
-        $json = $this->getSystemSetting('agent_tool_registry');
-        if (empty($json)) return [];
+        // 1. Discover tool definitions from enabled EMs
+        $emTools = $this->discoverEmToolDefinitions();
 
-        $registry = json_decode($json, true);
-        if (json_last_error() !== JSON_ERROR_NONE || !is_array($registry)) {
-            $this->emError("Invalid agent_tool_registry JSON: " . json_last_error_msg());
-            return [];
+        // 2. Load JSON registry (takes priority on name conflicts)
+        $jsonTools = [];
+        $json = $this->getSystemSetting('agent_tool_registry');
+        if (!empty($json)) {
+            $registry = json_decode($json, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($registry)) {
+                $jsonTools = $registry[(string)$pid] ?? $registry[$pid] ?? [];
+                if (!is_array($jsonTools)) $jsonTools = [];
+            } else {
+                $this->emError("Invalid agent_tool_registry JSON: " . json_last_error_msg());
+            }
         }
 
-        $tools = $registry[(string)$pid] ?? $registry[$pid] ?? [];
-        if (!is_array($tools)) return [];
+        // 3. Merge: EM definitions as base, JSON registry overrides by name
+        $merged = [];
+        foreach ($emTools as $tool) {
+            $name = $tool['name'] ?? '';
+            if ($name) $merged[$name] = $tool;
+        }
+        foreach ($jsonTools as $tool) {
+            $name = $tool['name'] ?? '';
+            if ($name) $merged[$name] = $tool; // JSON wins on conflict
+        }
 
-        // Validate each tool definition
+        // 4. Validate each tool definition
         $validatedTools = [];
-        foreach ($tools as $tool) {
+        foreach ($merged as $tool) {
             $validation = $this->validateToolDefinition($tool);
             if ($validation['valid']) {
                 $validatedTools[] = $tool;
@@ -445,6 +460,76 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
 
         return $validatedTools;
+    }
+
+    /**
+     * Discover tool definitions from enabled tool EMs.
+     *
+     * Reads agent-tool-definitions from config.json of EMs listed
+     * in the agent_tool_em_prefixes system setting.
+     *
+     * @return array Tool configs with auto-filled endpoint/module fields
+     */
+    private function discoverEmToolDefinitions(): array
+    {
+        $prefixesRaw = $this->getSystemSetting('agent_tool_em_prefixes');
+        if (empty($prefixesRaw)) return [];
+
+        $prefixes = array_map('trim', explode(',', $prefixesRaw));
+        $tools = [];
+
+        foreach ($prefixes as $prefix) {
+            if (empty($prefix)) continue;
+
+            try {
+                $configPath = $this->getModuleDirectoryPath($prefix) . '/config.json';
+                if (!file_exists($configPath)) {
+                    $this->emDebug("Config not found for tool EM: {$prefix}");
+                    continue;
+                }
+
+                $config = json_decode(file_get_contents($configPath), true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    $this->emError("Invalid config.json for tool EM: {$prefix}");
+                    continue;
+                }
+
+                $definitions = $config['agent-tool-definitions'] ?? [];
+                foreach ($definitions as $def) {
+                    $action = $def['api-action'] ?? '';
+                    $tools[] = [
+                        'name'        => $def['name'] ?? '',
+                        'description' => $def['description'] ?? '',
+                        'endpoint'    => 'module_api',
+                        'module'      => [
+                            'prefix' => $prefix,
+                            'action' => $action,
+                        ],
+                        'parameters'  => $def['parameters'] ?? ['type' => 'object', 'properties' => []],
+                        'readOnly'    => $def['readOnly'] ?? false,
+                        'destructive' => $def['destructive'] ?? false,
+                    ];
+                }
+
+            } catch (\Throwable $e) {
+                $this->emError("Failed to discover tools from {$prefix}: " . $e->getMessage());
+            }
+        }
+
+        return $tools;
+    }
+
+    /**
+     * Get the filesystem path for a REDCap external module by prefix.
+     */
+    private function getModuleDirectoryPath(string $prefix): string
+    {
+        if (method_exists('\ExternalModules', 'getModuleDirectoryPath')) {
+            return \ExternalModules::getModuleDirectoryPath($prefix);
+        }
+
+        // Fallback: standard REDCap modules directory
+        return APP_PATH_DOCROOT . "../modules/{$prefix}";
     }
 
     /**
