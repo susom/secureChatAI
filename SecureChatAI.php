@@ -329,6 +329,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             try {
                 $startAttempt = microtime(true);
 
+                // --- Server-Side Compaction (opt-in, before agent mode gate) ---
+                $params = $this->compactMessagesIfNeeded($params, $model);
+
                 // --- Agent Mode Gate ---
 
                 $agent_mode_requested = !empty($params['agent_mode']);
@@ -1267,6 +1270,181 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
 
         return $sanitized;
+    }
+
+    /**
+     * Convert a messages array to a readable string for token estimation
+     * and summarization prompts.
+     */
+    private function messagesToText(array $messages): string
+    {
+        $lines = [];
+        foreach ($messages as $msg) {
+            $role = $msg['role'] ?? 'unknown';
+            $content = $msg['content'] ?? '';
+
+            // Handle content arrays (some models use [{type: "text", text: "..."}])
+            if (is_array($content)) {
+                $parts = [];
+                foreach ($content as $block) {
+                    if (isset($block['text'])) $parts[] = $block['text'];
+                }
+                $content = implode("\n", $parts);
+            }
+
+            $lines[] = "[{$role}]: {$content}";
+        }
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Compact messages if they exceed the model's context window.
+     *
+     * Opt-in via params:
+     *   compact_if_needed  (bool)   Enable compaction
+     *   compact_keep_recent (int)   Recent messages to keep (default 6)
+     *   compact_model       (string) Cheap model for summarization
+     *
+     * Returns updated $params with compacted messages.
+     */
+    private function compactMessagesIfNeeded(array $params, string $model): array
+    {
+        if (empty($params['compact_if_needed'])) {
+            return $params;
+        }
+
+        $messages = $params['messages'] ?? [];
+        if (empty($messages)) {
+            return $params;
+        }
+
+        // Estimate current token count
+        $messagesText = $this->messagesToText($messages);
+        $currentTokens = $this->estimateTokens($messagesText, $model);
+
+        // Get context window for this model
+        $spec = $this->getModelContextSpec($model);
+        $threshold = (int) ($spec['context'] * 0.8);
+
+        if ($currentTokens < $threshold) {
+            $this->emDebug("Compaction: skipping ({$currentTokens} tokens < {$threshold} threshold)");
+            return $params;
+        }
+
+        $keepRecent = (int) ($params['compact_keep_recent'] ?? 6);
+        $summarizeModel = $params['compact_model'] ?? $model;
+
+        // Don't compact if too few messages
+        if (count($messages) <= $keepRecent + 2) {
+            return $params;
+        }
+
+        $this->emDebug("Compaction: triggering ({$currentTokens} tokens > {$threshold} threshold)", [
+            'total_messages' => count($messages),
+            'keep_recent' => $keepRecent,
+            'summarize_model' => $summarizeModel,
+        ]);
+
+        // Split into old + recent
+        $recentMessages = array_slice($messages, -$keepRecent);
+        $oldMessages = array_slice($messages, 0, count($messages) - $keepRecent);
+
+        // Separate system messages from conversation messages
+        $systemMessages = [];
+        $conversationMessages = [];
+        foreach ($oldMessages as $msg) {
+            if (($msg['role'] ?? '') === 'system') {
+                $systemMessages[] = $msg;
+            } else {
+                $conversationMessages[] = $msg;
+            }
+        }
+
+        if (empty($conversationMessages)) {
+            return $params;
+        }
+
+        // Summarize old conversation messages
+        $oldText = $this->messagesToText($conversationMessages);
+        $summaryPrompt = "Concisely summarize this conversation in 3-5 sentences. "
+            . "Preserve key facts, decisions, and context. Be brief but comprehensive.\n\n"
+            . $oldText;
+
+        try {
+            // Use correct token param for this model
+            $o1Models = ['o1', 'o3-mini', 'o4-mini'];
+            $tokenParam = in_array($summarizeModel, $o1Models)
+                ? 'max_completion_tokens'
+                : 'max_tokens';
+
+            $summaryResponse = $this->callLLMOnce($summarizeModel, [
+                'messages' => [
+                    ['role' => 'user', 'content' => $summaryPrompt]
+                ],
+                $tokenParam => 500,
+            ], null);
+
+            $summary = trim($summaryResponse['content'] ?? '');
+
+            if (empty($summary)) {
+                $this->emDebug("Compaction: summarization returned empty, skipping");
+                return $params;
+            }
+
+            // Rebuild messages: system + summary + recent
+            $summaryMsg = [
+                'role' => 'system',
+                'content' => "Previous conversation summary: {$summary}"
+            ];
+
+            $compactedMessages = array_merge(
+                $systemMessages,
+                [$summaryMsg],
+                $recentMessages
+            );
+
+            // Log metrics
+            $compactedText = $this->messagesToText($compactedMessages);
+            $compactedTokens = $this->estimateTokens($compactedText, $model);
+            $this->emDebug("Compaction: complete", [
+                'before_tokens' => $currentTokens,
+                'after_tokens' => $compactedTokens,
+                'reduction' => round((1 - $compactedTokens / $currentTokens) * 100, 1) . '%',
+                'before_messages' => count($messages),
+                'after_messages' => count($compactedMessages),
+            ]);
+
+            $params['messages'] = $compactedMessages;
+            return $params;
+
+        } catch (\Throwable $e) {
+            $this->emDebug("Compaction: summarization failed, proceeding without: " . $e->getMessage());
+            return $params;
+        }
+    }
+
+    /**
+     * Get context window spec for a model.
+     */
+    private function getModelContextSpec(string $model): array
+    {
+        $specs = [
+            'o1'               => ['context' => 200000],
+            'gpt-4.1'          => ['context' => 1000000],
+            'o3-mini'          => ['context' => 200000],
+            'gpt-5'            => ['context' => 400000],
+            'o4-mini'          => ['context' => 200000],
+            'claude'           => ['context' => 200000],
+            'claude-sonnet-3.5' => ['context' => 200000],
+            'claude-sonnet-3.7' => ['context' => 200000],
+            'claude-haiku-4.5' => ['context' => 200000],
+            'claude-opus-4'    => ['context' => 200000],
+            'claude-sonnet-4'  => ['context' => 200000],
+            'gemini20flash'    => ['context' => 1000000],
+            'llama3370b'       => ['context' => 128000],
+            'deepseek'         => ['context' => 128000],
+        ];
+        return $specs[$model] ?? ['context' => 128000];
     }
 
     private function estimateTokens(string $text, string $model): int {
