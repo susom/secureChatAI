@@ -13,6 +13,16 @@ require_once "classes/Models/ClaudeModelRequest.php";
 require_once "classes/Models/GenericModelRequest.php";
 require_once "classes/Models/GPT4oMiniTTSModelRequest.php";
 
+require_once "classes/ToolInterface.php";
+require_once "classes/ToolUse.php";
+require_once "classes/ToolResult.php";
+require_once "classes/ToolContext.php";
+require_once "classes/AbortController.php";
+require_once "classes/HookInterface.php";
+require_once "classes/HookResult.php";
+require_once "classes/JsonConfigToolAdapter.php";
+require_once "classes/ToolPipeline.php";
+
 require_once __DIR__ . '/vendor/autoload.php';
 
 use Google\Exception;
@@ -861,96 +871,106 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         array $tools,
         ?int $project_id
     ): array {
-        $tool = null;
+        // Build tool use + context
+        $toolUse = new ToolUse($tool_name, $arguments);
+        $context = new ToolContext($project_id);
+        $context->set('secure_chat_ai_instance', $this);
+        $context->set('guzzle_client', $this->guzzleClient);
 
+        // Phase 1: Lookup tool config from JSON registry
+        $toolConfig = null;
         foreach ($tools as $t) {
             if (($t['name'] ?? null) === $tool_name) {
-                $tool = $t;
+                $toolConfig = $t;
                 break;
             }
         }
 
-        if (!$tool) {
+        if (!$toolConfig) {
             return $this->agentError("UNKNOWN_TOOL", "Tool '{$tool_name}' not registered");
         }
 
-        // ---- Required args check ----
-        $required = $tool['parameters']['required'] ?? [];
-        $missing  = array_diff($required, array_keys($arguments));
+        // Wrap config as typed tool
+        $toolAdapter = new JsonConfigToolAdapter($toolConfig);
 
-        if (!empty($missing)) {
-            // Don't return error - let the agent ask the user naturally
+        // Build pipeline with hooks from config
+        $pipeline = new ToolPipeline(
+            resolver: fn() => $toolAdapter,
+            preHooks: $this->loadPreToolUseHooks(),
+            postHooks: $this->loadPostToolUseHooks()
+        );
+
+        // Run pipeline (Phases 2-7: parse, validate, pre-hooks, permissions, execute, post-hooks)
+        $result = $pipeline->handle($toolUse, $context);
+
+        // Preserve MISSING_PARAMETERS behavior: return error=false so agent can ask naturally
+        if ($result->isError && str_contains($result->errorMessage ?? '', 'Missing required')) {
+            $missing = str_replace('Missing required parameters: ', '', $result->errorMessage);
             return [
                 'error'   => false,
                 'type'    => 'MISSING_PARAMETERS',
-                'missing' => array_values($missing),
-                'result' => [
-                    'status' => 'incomplete',
-                    'message' => "Missing required parameters: " . implode(", ", $missing),
-                    'missing_fields' => array_values($missing)
+                'missing' => array_map('trim', explode(',', $missing)),
+                'result'  => [
+                    'status'         => 'incomplete',
+                    'message'        => $result->errorMessage,
+                    'missing_fields' => array_map('trim', explode(',', $missing))
                 ]
             ];
         }
 
-        // ---- Same-project EM call ----
-        if (($tool['endpoint'] ?? '') === 'module_api') {
-            return [
-                'error'  => false,
-                'result' => $this->redcap_module_api(
-                    $tool['module']['action'],
-                    $arguments
-                )
-            ];
+        return $result->toArray();
+    }
+
+    /**
+     * Load PreToolUse hooks from system setting.
+     *
+     * @return PreToolUseHook[]
+     */
+    private function loadPreToolUseHooks(): array
+    {
+        return $this->loadHooksFromSetting('pre_tool_use_hooks', PreToolUseHook::class);
+    }
+
+    /**
+     * Load PostToolUse hooks from system setting.
+     *
+     * @return PostToolUseHook[]
+     */
+    private function loadPostToolUseHooks(): array
+    {
+        return $this->loadHooksFromSetting('post_tool_use_hooks', PostToolUseHook::class);
+    }
+
+    /**
+     * Load and instantiate hook classes from a comma-separated system setting.
+     *
+     * @return array
+     */
+    private function loadHooksFromSetting(string $settingKey, string $interfaceName): array
+    {
+        $raw = $this->getSystemSetting($settingKey);
+        if (empty($raw)) {
+            return [];
         }
 
-        // ---- Cross-project REDCap API call ----
-        if (($tool['endpoint'] ?? '') === 'redcap_api') {
-            try {
-                $apiUrl   = rtrim($this->getSystemSetting('agent_tools_redcap_api_url'), '/') . '/';
-                $apiToken = $this->getSystemSetting('agent_tools_project_api_key');
+        $classNames = array_map('trim', explode(',', $raw));
+        $hooks = [];
 
-                if (empty($apiUrl) || empty($apiToken)) {
-                    return $this->agentError(
-                        "MISCONFIGURED_AGENT_TOOLS",
-                        "Missing agent_tools_redcap_api_url or agent_tools_project_api_key"
-                    );
-                }
+        foreach ($classNames as $className) {
+            if (empty($className) || !class_exists($className)) {
+                $this->emDebug("Hook class not found: {$className}");
+                continue;
+            }
 
-                $payload = array_merge([
-                    'token'        => $apiToken,
-                    'content'      => 'externalModule',
-                    'format'       => 'json',
-                    'returnFormat' => 'json',
-                    'prefix'       => $tool['redcap']['prefix'],
-                    'action'       => $tool['redcap']['action'],
-                ], $arguments);
-
-                $client = $this->guzzleClient;
-
-                $response = $client->post($apiUrl, [
-                    'form_params' => $payload,
-                    'timeout'     => 10,
-                ]);
-
-                $body = json_decode((string) $response->getBody(), true);
-
-                return [
-                    'error'  => false,
-                    'result' => $body
-                ];
-
-            } catch (\Throwable $e) {
-                return $this->agentError(
-                    "REDCAP_API_ERROR",
-                    $e->getMessage()
-                );
+            $instance = new $className();
+            if ($instance instanceof $interfaceName) {
+                $hooks[] = $instance;
+            } else {
+                $this->emDebug("Hook class {$className} does not implement {$interfaceName}");
             }
         }
 
-        return $this->agentError(
-            "UNSUPPORTED_TOOL_ENDPOINT",
-            "Endpoint '{$tool['endpoint']}' not supported"
-        );
+        return $hooks;
     }
 
     private function askForMoreInfoText(string $tool_name, array $missing_fields): string
