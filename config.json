@@ -98,6 +98,18 @@
             "required": false
         },
         {
+            "key": "pre_tool_use_hooks",
+            "name": "<b>Pre-Tool-Use Hooks</b><br><i>(optional)</i> Comma-separated class names implementing <code>PreToolUseHook</code>. Runs before each tool call. Can inspect input or deny execution.<br>Example: <code>App\\Hooks\\AuditHook,App\\Hooks\\RateLimitHook</code>",
+            "type": "textarea",
+            "required": false
+        },
+        {
+            "key": "post_tool_use_hooks",
+            "name": "<b>Post-Tool-Use Hooks</b><br><i>(optional)</i> Comma-separated class names implementing <code>PostToolUseHook</code>. Runs after each tool call. Can log results or trigger side-effects.<br>Example: <code>App\\Hooks\\MetricsHook</code>",
+            "type": "textarea",
+            "required": false
+        },
+        {
             "key": "agent_max_steps",
             "name": "<b>Agent: Max Steps Per Loop</b><br><i>Maximum number of agent reasoning iterations</i>",
             "type": "text",
