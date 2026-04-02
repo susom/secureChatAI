@@ -110,6 +110,12 @@
             "required": false
         },
         {
+            "key": "agent_tool_em_prefixes",
+            "name": "<b>Agent Tool EM Prefixes</b><br><i>(optional)</i> Comma-separated EM prefixes that provide agent tools via <code>agent-tool-definitions</code> in their config.json.<br>Example: <code>redcap_agent_rexi_tools,redcap_agent_foo_tools</code>",
+            "type": "textarea",
+            "required": false
+        },
+        {
             "key": "agent_max_steps",
             "name": "<b>Agent: Max Steps Per Loop</b><br><i>Maximum number of agent reasoning iterations</i>",
             "type": "text",

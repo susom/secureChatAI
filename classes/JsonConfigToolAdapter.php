@@ -35,24 +35,19 @@ class JsonConfigToolAdapter implements ToolInterface
 
     public function validateInput(array $input, ToolContext $context): ?string
     {
-        $required = $this->config['parameters']['required'] ?? [];
-        $missing = array_diff($required, array_keys($input));
-
-        if (!empty($missing)) {
-            return "Missing required parameters: " . implode(", ", $missing);
-        }
-
+        // Required field checking is handled by ToolPipeline Phase 2.
+        // This hook is for tool-specific validation beyond schema checks.
         return null;
     }
 
     public function isReadOnly(): bool
     {
-        return false;
+        return $this->config['readOnly'] ?? false;
     }
 
     public function isDestructive(): bool
     {
-        return false;
+        return $this->config['destructive'] ?? false;
     }
 
     /**
