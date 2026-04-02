@@ -134,6 +134,12 @@
             "default": "120"
         },
         {
+            "key": "agent_max_subagent_depth",
+            "name": "<b>Agent: Max Sub-Agent Depth</b><br><i>How deep sub-agents can spawn children. 0 = disable sub-agents, 1 = one level, 2 = sub-agents can spawn children.</i>",
+            "type": "text",
+            "default": "1"
+        },
+        {
             "key": "agent_max_clarifications",
             "name": "<b>Max Agent Clarification Requests</b>",
             "type": "text",

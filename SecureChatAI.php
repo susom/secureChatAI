@@ -628,9 +628,34 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return implode("\n", $lines);
     }
 
-    private function injectAgentSystemContext(array $messages, array $tools): array
+    private function injectAgentSystemContext(array $messages, array $tools, int $depth = 0, int $maxDepth = 1): array
     {
         $routerPrompt = $this->getAgentRouterPrompt();
+
+        // Add spawnAgent tool to catalog when depth allows
+        if ($depth < $maxDepth) {
+            $spawnTool = [
+                'name'        => 'spawnAgent',
+                'description' => 'Spawn a sub-agent to handle a task independently. '
+                    . 'The sub-agent has its own tool pool and returns a final result.',
+                'parameters'  => [
+                    'type'       => 'object',
+                    'properties' => [
+                        'prompt' => [
+                            'type'        => 'string',
+                            'description' => 'Task for the sub-agent. Be specific and self-contained.'
+                        ],
+                        'allowed_tools' => [
+                            'type'        => 'array',
+                            'items'       => ['type' => 'string'],
+                            'description' => 'Subset of tools the sub-agent can use. Empty = all tools.'
+                        ]
+                    ],
+                    'required' => ['prompt']
+                ]
+            ];
+            $tools[] = $spawnTool;
+        }
 
         // ALWAYS include tool catalog in agent mode
         $routerPrompt .= "\n\n" . $this->buildToolCatalogText($tools);
@@ -643,7 +668,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return $messages;
     }
 
-    private function runAgentLoop(string $model, array $params, ?int $project_id): array
+    private function runAgentLoop(string $model, array $params, ?int $project_id, int $depth = 0, int $maxDepth = 1): array
     {
         $messages = $params['messages'] ?? [];
         $tools = $this->loadToolsForProject($project_id);
@@ -662,11 +687,18 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'tool_names' => array_column($tools, 'name')
         ]);
 
-        // Initialize safety limits
+        // Initialize safety limits (reduced for sub-agents)
         $max_steps = (int) ($this->getSystemSetting('agent_max_steps') ?? 8);
         $max_tools = (int) ($this->getSystemSetting('agent_max_tools_per_run') ?? 15);
         $timeout = (int) ($this->getSystemSetting('agent_timeout_seconds') ?? 120);
         $max_tool_result_chars = (int) ($this->getSystemSetting('agent_max_tool_result_chars') ?? 8000);
+
+        // Sub-agents get reduced limits to prevent runaway token usage
+        if ($depth > 0) {
+            $max_steps = max(2, (int) ($max_steps / 2));
+            $max_tools = max(2, (int) ($max_tools / 2));
+            $timeout = max(15, (int) ($timeout / 2));
+        }
         $start_time = time();
 
         // CRITICAL: Agent mode needs higher token limit to avoid truncation mid-JSON
@@ -683,7 +715,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $tools_used = []; // Track tools used for UI display
 
         // Inject router system prompt + tool catalog
-        $messages = $this->injectAgentSystemContext($messages, $tools);
+        $messages = $this->injectAgentSystemContext($messages, $tools, $depth, $maxDepth);
         $params['messages'] = $messages;
 
         // ⚠️ IMPORTANT: disable native OpenAI tools for agent mode
@@ -778,7 +810,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     tool_name: $tool_name,
                     arguments: $arguments,
                     tools: $tools,
-                    project_id: $project_id
+                    project_id: $project_id,
+                    model: $model
                 );
 
                 // Return errors immediately (but not MISSING_PARAMETERS - let agent handle that)
@@ -957,8 +990,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         string $tool_name,
         array $arguments,
         array $tools,
-        ?int $project_id
+        ?int $project_id,
+        string $model = 'o3-mini'
     ): array {
+        // Built-in: spawnAgent (before pipeline lookup)
+        if ($tool_name === 'spawnAgent') {
+            return $this->handleSpawnAgentCall($arguments, $project_id, $model);
+        }
+
         // Build tool use + context
         $toolUse = new ToolUse($tool_name, $arguments);
         $context = new ToolContext($project_id);
@@ -1072,6 +1111,114 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'error' => true,
             'type' => $type,
             'message' => $message
+        ];
+    }
+
+    /**
+     * Handle the built-in spawnAgent tool call.
+     */
+    private function handleSpawnAgentCall(array $arguments, ?int $project_id, string $model): array
+    {
+        $prompt = $arguments['prompt'] ?? '';
+        if (empty($prompt)) {
+            return $this->agentError("MISSING_PROMPT", "spawnAgent requires a 'prompt' argument");
+        }
+
+        $maxDepth = (int) ($this->getSystemSetting('agent_max_subagent_depth') ?? 1);
+        if ($maxDepth <= 0) {
+            return $this->agentError("SUBAGENTS_DISABLED", "Sub-agents are disabled (agent_max_subagent_depth=0)");
+        }
+
+        $allowedTools = $arguments['allowed_tools'] ?? [];
+
+        return $this->spawnAgent(
+            prompt: $prompt,
+            model: $model,
+            projectId: $project_id,
+            depth: 1,
+            maxDepth: $maxDepth,
+            allowedTools: $allowedTools
+        );
+    }
+
+    /**
+     * Spawn a sub-agent to handle a task independently.
+     *
+     * The sub-agent runs a fresh agent loop with reduced limits
+     * and returns its final answer as a tool result.
+     */
+    private function spawnAgent(
+        string $prompt,
+        string $model,
+        ?int $projectId,
+        int $depth,
+        int $maxDepth,
+        array $allowedTools = []
+    ): array
+    {
+        $this->emDebug("SPAWN AGENT (depth={$depth}/{$maxDepth})", [
+            'prompt_preview' => substr($prompt, 0, 100),
+            'model' => $model,
+            'allowed_tools' => $allowedTools ?: '(all)'
+        ]);
+
+        // Depth guard
+        if ($depth > $maxDepth) {
+            return $this->agentError(
+                "MAX_DEPTH_EXCEEDED",
+                "Sub-agent depth {$depth} exceeds max {$maxDepth}"
+            );
+        }
+
+        // Load tools for the project
+        $allTools = $this->loadToolsForProject($projectId);
+
+        // Scope tools if requested
+        if (!empty($allowedTools)) {
+            $allTools = array_values(array_filter($allTools, function ($t) use ($allowedTools) {
+                return in_array($t['name'] ?? '', $allowedTools);
+            }));
+        }
+
+        // Build fresh messages from the prompt
+        $messages = [
+            ['role' => 'user', 'content' => $prompt]
+        ];
+
+        // Reduced limits for sub-agents
+        $params = [
+            'messages' => $messages,
+            'max_tokens' => 4000,
+        ];
+
+        // Run child agent loop
+        $result = $this->runAgentLoop(
+            model: $model,
+            params: $params,
+            projectId: $projectId,
+            depth: $depth,
+            maxDepth: $maxDepth
+        );
+
+        // Format result for parent
+        if (!empty($result['error'])) {
+            return [
+                'error'  => false, // Don't propagate as hard error to parent
+                'result' => [
+                    'status' => 'failed',
+                    'error'  => $result['message'] ?? 'Sub-agent failed',
+                ]
+            ];
+        }
+
+        $finalAnswer = $result['content'] ?? $result['message'] ?? '(no result)';
+
+        return [
+            'error'  => false,
+            'result' => [
+                'status' => 'completed',
+                'result' => $finalAnswer,
+            ]
         ];
     }
 
