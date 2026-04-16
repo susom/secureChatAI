@@ -344,7 +344,7 @@
     ],
     "project-settings": [
         {
-            "key": "agent_tool_em_prefixes",
+            "key": "project_agent_tool_em_prefixes",
             "name": "<b>Agent Tool EM Prefixes</b><br><i>(optional)</i> Comma-separated EM prefixes that provide agent tools for this project. Overrides the system-level default when set.<br>Example: <code>redcap_agent_record_tools,redcap_agent_rexi_tools</code>",
             "type": "textarea",
             "required": false

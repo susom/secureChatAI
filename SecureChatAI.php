@@ -481,7 +481,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // Project-level prefixes take priority over system-level
         $prefixesRaw = null;
         if (!empty($pid)) {
-            $prefixesRaw = $this->getProjectSetting('agent_tool_em_prefixes', $pid);
+            $prefixesRaw = $this->getProjectSetting('project_agent_tool_em_prefixes', $pid);
         }
         if (empty($prefixesRaw)) {
             $prefixesRaw = $this->getSystemSetting('agent_tool_em_prefixes');
