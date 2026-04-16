@@ -421,8 +421,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     {
         if (empty($pid)) return [];
 
-        // 1. Discover tool definitions from enabled EMs
-        $emTools = $this->discoverEmToolDefinitions();
+        // 1. Discover tool definitions from enabled EMs (project-level overrides system-level)
+        $emTools = $this->discoverEmToolDefinitions($pid);
 
         // 2. Load JSON registry (takes priority on name conflicts)
         $jsonTools = [];
@@ -469,13 +469,23 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      * Discover tool definitions from enabled tool EMs.
      *
      * Reads agent-tool-definitions from config.json of EMs listed
-     * in the agent_tool_em_prefixes system setting.
+     * in the agent_tool_em_prefixes setting.
      *
+     * Project-level setting takes priority; falls back to system-level.
+     *
+     * @param int|null $pid Project ID for project-level prefix lookup
      * @return array Tool configs with auto-filled endpoint/module fields
      */
-    private function discoverEmToolDefinitions(): array
+    private function discoverEmToolDefinitions(?int $pid = null): array
     {
-        $prefixesRaw = $this->getSystemSetting('agent_tool_em_prefixes');
+        // Project-level prefixes take priority over system-level
+        $prefixesRaw = null;
+        if (!empty($pid)) {
+            $prefixesRaw = $this->getProjectSetting('agent_tool_em_prefixes', $pid);
+        }
+        if (empty($prefixesRaw)) {
+            $prefixesRaw = $this->getSystemSetting('agent_tool_em_prefixes');
+        }
         if (empty($prefixesRaw)) return [];
 
         $prefixes = array_map('trim', explode(',', $prefixesRaw));
