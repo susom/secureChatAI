@@ -417,40 +417,88 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         ]);
     }
 
+    // -------------------------------------------------------------------------
+    // Public inspection helpers (for test/diagnostic EMs)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Return the full tool catalog for a project (EM-discovered + JSON registry).
+     */
+    public function getToolCatalogForProject(?int $pid): array
+    {
+        return $this->loadToolsForProject($pid);
+    }
+
+    /**
+     * Return the list of configured model aliases.
+     */
+    public function getAvailableModels(): array
+    {
+        $this->initSecureChatAI();
+        return array_keys($this->modelConfig);
+    }
+
+    /**
+     * Return the context window size (in tokens) for a model.
+     */
+    public function getModelContextWindow(string $model): int
+    {
+        return $this->getModelContextSpec($model)['context'] ?? 128000;
+    }
+
+    /**
+     * Run server-side message compaction and return before/after stats.
+     *
+     * Makes one LLM call (to generate the summary) if compaction triggers.
+     */
+    public function runCompaction(array $messages, string $model, int $keepRecent = 6, ?string $summarizeModel = null): array
+    {
+        $params = [
+            'messages'             => $messages,
+            'compact_if_needed'    => true,
+            'compact_keep_recent'  => $keepRecent,
+            'compact_model'        => $summarizeModel ?? $model,
+        ];
+
+        $beforeCount = count($messages);
+        $beforeText  = $this->messagesToText($messages);
+        $beforeTokens = $this->estimateTokens($beforeText, $model);
+
+        $result = $this->compactMessagesIfNeeded($params, $model);
+
+        $afterMessages = $result['messages'] ?? $messages;
+        $afterCount    = count($afterMessages);
+        $afterText     = $this->messagesToText($afterMessages);
+        $afterTokens   = $this->estimateTokens($afterText, $model);
+
+        $contextWindow = $this->getModelContextWindow($model);
+        $threshold     = (int)($contextWindow * 0.8);
+
+        return [
+            'compacted'       => ($afterCount < $beforeCount),
+            'context_window'  => $contextWindow,
+            'threshold'       => $threshold,
+            'before_messages' => $beforeCount,
+            'before_tokens'   => $beforeTokens,
+            'after_messages'  => $afterCount,
+            'after_tokens'    => $afterTokens,
+            'reduction_pct'   => $beforeTokens > 0
+                ? round((1 - $afterTokens / $beforeTokens) * 100, 1)
+                : 0,
+            'messages'        => $afterMessages,
+        ];
+    }
+
     private function loadToolsForProject(?int $pid): array
     {
         if (empty($pid)) return [];
 
-        // 1. Discover tool definitions from enabled EMs (project-level overrides system-level)
+        // Discover tool definitions from enabled EMs (project-level overrides system-level)
         $emTools = $this->discoverEmToolDefinitions($pid);
 
-        // 2. Load JSON registry (takes priority on name conflicts)
-        $jsonTools = [];
-        $json = $this->getSystemSetting('agent_tool_registry');
-        if (!empty($json)) {
-            $registry = json_decode($json, true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($registry)) {
-                $jsonTools = $registry[(string)$pid] ?? $registry[$pid] ?? [];
-                if (!is_array($jsonTools)) $jsonTools = [];
-            } else {
-                $this->emError("Invalid agent_tool_registry JSON: " . json_last_error_msg());
-            }
-        }
-
-        // 3. Merge: EM definitions as base, JSON registry overrides by name
-        $merged = [];
-        foreach ($emTools as $tool) {
-            $name = $tool['name'] ?? '';
-            if ($name) $merged[$name] = $tool;
-        }
-        foreach ($jsonTools as $tool) {
-            $name = $tool['name'] ?? '';
-            if ($name) $merged[$name] = $tool; // JSON wins on conflict
-        }
-
-        // 4. Validate each tool definition
+        // Validate each tool definition
         $validatedTools = [];
-        foreach ($merged as $tool) {
+        foreach ($emTools as $tool) {
             $validation = $this->validateToolDefinition($tool);
             if ($validation['valid']) {
                 $validatedTools[] = $tool;
@@ -537,12 +585,24 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      */
     private function getModuleDirectoryPath(string $prefix): string
     {
-        if (method_exists('\ExternalModules', 'getModuleDirectoryPath')) {
-            return \ExternalModules::getModuleDirectoryPath($prefix);
+        if (method_exists('\ExternalModules\ExternalModules', 'getModuleDirectoryPath')) {
+            $path = \ExternalModules\ExternalModules::getModuleDirectoryPath($prefix);
+            if ($path !== false) {
+                return $path;
+            }
         }
 
-        // Fallback: standard REDCap modules directory
-        return APP_PATH_DOCROOT . "../modules/{$prefix}";
+        // Fallback: check both modules/ and modules-local/
+        $docRoot = APP_PATH_DOCROOT . "../";
+        foreach (['modules/', 'modules-local/'] as $dir) {
+            $pattern = $docRoot . $dir . $prefix . "_v*";
+            $matches = glob($pattern, GLOB_ONLYDIR);
+            if (!empty($matches)) {
+                return $matches[0];
+            }
+        }
+
+        return $docRoot . "modules/{$prefix}";
     }
 
     /**
@@ -1030,11 +1090,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // Wrap config as typed tool
         $toolAdapter = new JsonConfigToolAdapter($toolConfig);
 
-        // Build pipeline with hooks from config
+        // Build pipeline with hooks from config (system + project)
         $pipeline = new ToolPipeline(
             resolver: fn() => $toolAdapter,
-            preHooks: $this->loadPreToolUseHooks(),
-            postHooks: $this->loadPostToolUseHooks()
+            preHooks: $this->loadPreToolUseHooks($project_id),
+            postHooks: $this->loadPostToolUseHooks($project_id)
         );
 
         // Run pipeline (Phases 2-7: parse, validate, pre-hooks, permissions, execute, post-hooks)
@@ -1059,33 +1119,47 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     }
 
     /**
-     * Load PreToolUse hooks from system setting.
+     * Load PreToolUse hooks from system + project settings.
      *
      * @return PreToolUseHook[]
      */
-    private function loadPreToolUseHooks(): array
+    private function loadPreToolUseHooks(?int $projectId = null): array
     {
-        return $this->loadHooksFromSetting('pre_tool_use_hooks', PreToolUseHook::class);
+        $system  = $this->loadHooksFromSetting('pre_tool_use_hooks', PreToolUseHook::class, null);
+        $project = $projectId
+            ? $this->loadHooksFromSetting('project_pre_tool_use_hooks', PreToolUseHook::class, $projectId)
+            : [];
+        return array_merge($system, $project);
     }
 
     /**
-     * Load PostToolUse hooks from system setting.
+     * Load PostToolUse hooks from system + project settings.
      *
      * @return PostToolUseHook[]
      */
-    private function loadPostToolUseHooks(): array
+    private function loadPostToolUseHooks(?int $projectId = null): array
     {
-        return $this->loadHooksFromSetting('post_tool_use_hooks', PostToolUseHook::class);
+        $system  = $this->loadHooksFromSetting('post_tool_use_hooks', PostToolUseHook::class, null);
+        $project = $projectId
+            ? $this->loadHooksFromSetting('project_post_tool_use_hooks', PostToolUseHook::class, $projectId)
+            : [];
+        return array_merge($system, $project);
     }
 
     /**
-     * Load and instantiate hook classes from a comma-separated system setting.
+     * Load and instantiate hook classes from a comma-separated setting.
      *
+     * @param string $settingKey  Setting name
+     * @param string $interfaceName  Required interface
+     * @param int|null $projectId  If provided, reads project setting; otherwise system setting
      * @return array
      */
-    private function loadHooksFromSetting(string $settingKey, string $interfaceName): array
+    private function loadHooksFromSetting(string $settingKey, string $interfaceName, ?int $projectId = null): array
     {
-        $raw = $this->getSystemSetting($settingKey);
+        $raw = $projectId !== null
+            ? $this->getProjectSetting($settingKey, $projectId)
+            : $this->getSystemSetting($settingKey);
+
         if (empty($raw)) {
             return [];
         }

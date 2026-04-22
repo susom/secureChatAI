@@ -1,0 +1,94 @@
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          USER CLICKS "PARSE & SAVE"                            │
+└──────────────────────────────────┬──────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        CUSTOM PROJECT EM                                        │
+│                     (e.g. mspa_test)                                            │
+│                                                                                 │
+│  • Injects UI on data entry form                                                │
+│  • Sends free text + record ID + PID                                            │
+│  • Calls: $secureChatAI->callAI(..., agent_mode: true, $pid)                   │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────┐                           │
+│  │  Any EM can be a "caller" — thin wrapper only   │                           │
+│  └─────────────────────────────────────────────────┘                           │
+└──────────────────────────────────┬──────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                 │
+│                        SECURE CHAT AI  (The Brain)                              │
+│                                                                                 │
+│   ┌──────────────────────────────────────────────────────────────┐              │
+│   │                    AGENT LOOP                                │              │
+│   │                                                              │              │
+│   │  1. Load tools for project (auto-discovery)                  │              │
+│   │     └─► Reads project_agent_tool_em_prefixes                 │              │
+│   │     └─► Reads each EM's config.json → agent-tool-definitions │              │
+│   │                                                              │              │
+│   │  2. Build prompt + tool catalog                              │              │
+│   │     └─► "You have these tools: [...]"                        │              │
+│   │                                                              │              │
+│   │  3. Call LLM (GPT-4.1, Claude, etc.)                        │              │
+│   │     └─► LLM responds: "I want to call tool X with args Y"   │              │
+│   │                                                              │              │
+│   │  4. Execute tool call ──────────────────────────────┐        │              │
+│   │                                                     │        │              │
+│   │  5. Feed result back to LLM                         │        │              │
+│   │     └─► Loop until final_answer or safety limit     │        │              │
+│   │                                                     │        │              │
+│   │  Safety: max steps │ max tools │ timeout │ loop det │        │              │
+│   └─────────────────────────────────────────────────────┼────────┘              │
+│                                                         │                       │
+│   Does NOT contain domain logic — only orchestration    │                       │
+│                                                         │                       │
+└─────────────────────────────────────────────────────────┼───────────────────────┘
+                                                          │
+                     ┌────────────────────────────────────┼───────────────────┐
+                     │                                    │                   │
+                     ▼                                    ▼                   ▼
+┌──────────────────────────┐  ┌──────────────────────────┐  ┌────────────────────────┐
+│   RECORD TOOLS EM        │  │   REXI TOOLS EM          │  │   YOUR FUTURE EM       │
+│                          │  │                          │  │                        │
+│  • projects.getMetadata  │  │  • escalation.create     │  │  • custom.tool1        │
+│  • projects.getInstrumts │  │  • escalation.list       │  │  • custom.tool2        │
+│  • records.get           │  │  • escalation.get        │  │  • ...                 │
+│  • records.search        │  │                          │  │                        │
+│  • records.save          │  │  Scoped to escalation    │  │  Just add config.json  │
+│  • records.evalLogic     │  │  project only            │  │  + agent-tool-defs     │
+│  • survey.getLink        │  │                          │  │  + redcap_module_api() │
+│  • projects.search       │  │                          │  │                        │
+│                          │  │                          │  │  Auto-discovered! ✨    │
+│  Scoped to calling PID   │  │                          │  │                        │
+└──────────────────────────┘  └──────────────────────────┘  └────────────────────────┘
+         ▲                             ▲                             ▲
+         │                             │                             │
+         └─────────────────────────────┴─────────────────────────────┘
+                                       │
+                          ┌────────────┴────────────┐
+                          │   PROJECT SETTINGS       │
+                          │                          │
+                          │   PID 65:                │
+                          │     tools = record_tools │
+                          │                          │
+                          │   PID 70:                │
+                          │     tools = rexi_tools,  │
+                          │            record_tools  │
+                          │                          │
+                          │   PID 99:                │
+                          │     tools = your_future  │
+                          └─────────────────────────┘
+
+
+  ════════════════════════════════════════════════════════════════════
+
+   WHY SEPARATE EMs?
+
+   ✅ Per-project scoping    → PID 65 gets record tools, PID 70 gets both
+   ✅ Least privilege        → Bug in escalation ≠ records exposed
+   ✅ Independent releases   → Ship escalation fix without touching records
+   ✅ Zero-code extensible   → New tools = new EM + config.json, done
+   ✅ Brain stays clean      → SecureChatAI = orchestration only

@@ -6,8 +6,8 @@ namespace Stanford\SecureChatAI;
  * Contract for typed tool definitions.
  *
  * EMs can implement this interface directly to participate in the
- * tool execution pipeline. Tools that only exist in the JSON
- * agent_tool_registry are wrapped by JsonConfigToolAdapter.
+ * tool execution pipeline. Tools discovered from EM config.json
+ * agent-tool-definitions are wrapped by JsonConfigToolAdapter.
  */
 interface ToolInterface
 {
