@@ -102,11 +102,12 @@ Uses **Yethee\Tiktoken** library for token counting:
 
 ### Agent Tools Definition
 
-Tools defined in system setting `agent_tool_registry` as JSON:
-- Must have: `name`, `description`, `endpoint`, `parameters`
-- Endpoint types: `module_api`, `redcap_api`, or `http`
+Tools are auto-discovered from EMs listed in `agent_tool_em_prefixes` (system) or `project_agent_tool_em_prefixes` (project). Each tool EM defines tools in its config.json `agent-tool-definitions` array.
+
+Tool definitions must have: `name`, `description`, `endpoint`, `parameters`
+- Endpoint types: `module_api` (EM-to-EM, primary), `redcap_api`, or `http`
 - Validated at load time; malformed tools logged and excluded
-- Project-scoped: cannot access other projects
+- Project-scoped via the prefixes setting
 - Parameters validated strictly before tool execution
 
 ## Testing
@@ -136,7 +137,7 @@ All configuration via **system settings**:
 - **Model Registry**: `api-settings` (repeatable, per-model API endpoints, tokens, aliases)
 - **Defaults**: `gpt-temperature`, `gpt-top-p`, `gpt-frequency-penalty`, `gpt-presence-penalty`, `gpt-max-tokens`, `reasoning-effort`
 - **Whisper**: `whisper-language`, `whisper-temperature`, `whisper-top-p`, `whisper-n`, etc.
-- **Agent Mode**: `enable_agent_mode`, `agent_max_steps`, `agent_max_tools_per_run`, `agent_timeout_seconds`, `agent_max_tool_result_chars`, `agent_router_system_prompt`, `agent_tool_registry`
+- **Agent Mode**: `enable_agent_mode`, `agent_max_steps`, `agent_max_tools_per_run`, `agent_timeout_seconds`, `agent_max_tool_result_chars`, `agent_router_system_prompt`, `agent_tool_em_prefixes`
 - **DNS/Network**: `apim_dns_override_ip`, `guzzle-timeout`
 - **Debug**: `enable-system-debug-logging`
 

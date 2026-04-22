@@ -314,14 +314,14 @@ $session = SecureChatLog::rehydrateSession($module, 'abc123', $project_id);
 
 ## Agent Tool Integration
 
-Tools are defined via **system settings** and are:
+Tools are auto-discovered from enabled EMs whose prefix is listed in `agent_tool_em_prefixes` (system setting) or `project_agent_tool_em_prefixes` (project setting). SecureChatAI reads each EM's `agent-tool-definitions` from config.json and invokes them via direct PHP calls (EM-to-EM, no HTTP).
 
-- Project-scoped
-- Explicitly registered
-- Argument-validated
-- Executed via:
-  - Module API calls, or
-  - REDCap API calls
+Tools are:
+
+- Project-scoped (each project declares which tool EM prefixes it can access)
+- Auto-discovered from config.json
+- Argument-validated at load time
+- Executed via direct EM-to-EM PHP calls (`module_api`) or optionally via REDCap API (`redcap_api`)
 
 SecureChatAI does **not** allow arbitrary or ad-hoc tool execution.
 
@@ -391,7 +391,7 @@ Configured entirely via **System Settings**:
   - `agent_timeout_seconds` - Max wall-clock execution time (default: 120)
   - `agent_max_tool_result_chars` - Max chars per tool result before truncation (default: 8000)
   - `agent_router_system_prompt` - Defines agent routing behavior
-  - `agent_tool_registry` - JSON-defined, project-scoped tool catalog
+  - `agent_tool_em_prefixes` - Comma-separated EM prefixes that provide agent tools
 - **Logging and debug flags**
 
 No code changes are required to add or modify models or tools.

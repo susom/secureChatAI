@@ -3,10 +3,10 @@
 namespace Stanford\SecureChatAI;
 
 /**
- * Adapter that wraps a JSON-configured tool (from agent_tool_registry)
+ * Adapter that wraps a JSON-configured tool (from agent-tool-definitions in config.json)
  * to implement ToolInterface.
  *
- * This bridges the existing JSON registry into the typed pipeline
+ * This bridges the EM-discovered tool definitions into the typed pipeline
  * without requiring every tool EM to implement ToolInterface.
  */
 class JsonConfigToolAdapter implements ToolInterface
@@ -73,15 +73,24 @@ class JsonConfigToolAdapter implements ToolInterface
 
     private function callModuleApi(array $input, ToolContext $context): array
     {
+        $prefix = $this->config['module']['prefix'] ?? '';
+        $action = $this->config['module']['action'] ?? '';
+
+        if (!empty($prefix)) {
+            // Call the target tool EM's redcap_module_api
+            $toolModule = \ExternalModules\ExternalModules::getModuleInstance($prefix);
+            if (!$toolModule) {
+                throw new \RuntimeException("Tool module '{$prefix}' not available (not enabled?)");
+            }
+            return $toolModule->redcap_module_api($action, $input);
+        }
+
+        // Fallback: call SecureChatAI's own API (for built-in tools)
         $module = $context->get('secure_chat_ai_instance');
         if (!$module) {
             throw new \RuntimeException("SecureChatAI instance not available in ToolContext");
         }
-
-        return $module->redcap_module_api(
-            $this->config['module']['action'],
-            $input
-        );
+        return $module->redcap_module_api($action, $input);
     }
 
     private function callRedcapApi(array $input, ToolContext $context): array

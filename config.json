@@ -80,21 +80,9 @@
             "required": false
         },
         {
-            "key": "agent_tools_project_pid",
-            "name": "<b>Agent Tools Project PID</b>",
-            "type": "text",
-            "required": true
-        },
-        {
             "key": "agent_tools_project_api_key",
-            "name": "<b>Agent Tools Project API Key</b><br><i>API token for the dedicated Agent Tools REDCap project</i>",
+            "name": "<b>Agent Tools Project API Key</b><br><i>API token for external tool access via REDCap API. Only needed if tools use the redcap_api endpoint (not required for EM-to-EM tool calls).</i>",
             "type": "text",
-            "required": true
-        },
-        {
-            "key": "agent_tool_registry",
-            "name": "<b>Agent Tool Registry (JSON)</b><br><i>Defines allowed tools for agentic workflows. Project-scoped.</i><br>TODO: automate this",
-            "type": "textarea",
             "required": false
         },
         {
@@ -346,6 +334,18 @@
         {
             "key": "project_agent_tool_em_prefixes",
             "name": "<b>Agent Tool EM Prefixes</b><br><i>(optional)</i> Comma-separated EM prefixes that provide agent tools for this project. Overrides the system-level default when set.<br>Example: <code>redcap_agent_record_tools,redcap_agent_rexi_tools</code>",
+            "type": "textarea",
+            "required": false
+        },
+        {
+            "key": "project_pre_tool_use_hooks",
+            "name": "<b>Pre-Tool-Use Hooks (Project)</b><br><i>(optional)</i> Comma-separated class names implementing <code>PreToolUseHook</code>. Merged with system-level hooks.<br>Example: <code>Stanford\\TestAgentHarness\\AuditPreHook</code>",
+            "type": "textarea",
+            "required": false
+        },
+        {
+            "key": "project_post_tool_use_hooks",
+            "name": "<b>Post-Tool-Use Hooks (Project)</b><br><i>(optional)</i> Comma-separated class names implementing <code>PostToolUseHook</code>. Merged with system-level hooks.<br>Example: <code>Stanford\\TestAgentHarness\\AuditPostHook</code>",
             "type": "textarea",
             "required": false
         },
