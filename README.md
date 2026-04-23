@@ -119,69 +119,45 @@ This separation ensures:
 
 ### Agentic Workflow (Optional)
 
-#### Tiktoken-based Dynamic Max Tokens
-Starting with the 2026-01-12 release, SecureChatAI now calculates the prompt token count using the Yethee\Tiktoken library to automatically scale max tokens for each model. This ensures:
-- Agentic flows have enough headroom to avoid truncation.
-- Non-agent calls also benefit from higher overall token limits.
-- We minimize wasted tokens by only allocating as many as needed.
+When a caller sets `agent_mode = true`, SecureChatAI becomes an agent orchestrator:
 
-Configuration details:
-- See computeDynamicMaxTokens() in SecureChatAI.php for per-model token buffers.
-- The default fallback is up to 16k tokens or more, depending on the model.
-- Agent mode also bumps maximum tokens to ensure multi-step tool usage remains stable.
+1. **Tool Discovery:** Loads tool definitions from all EMs matching the configured **Agent Tool EM Prefixes** (system or project level). Each EM's `agent-tool-definitions` from config.json are read and presented to the LLM as available tools.
 
+2. **Agent Loop:**
+   - Injects a router system prompt and project-scoped tool catalog
+   - Forces a JSON schema-capable model (auto-switches if the requested model doesn't support structured output)
+   - The LLM responds with either:
+     - `{"tool_call": {"name": "...", "arguments": {...}}}` → execute a tool
+     - `{"final_answer": "..."}` → return the response to the user
+   - Tool calls are executed via **EM-to-EM direct PHP** (`getModuleInstance()->redcap_module_api()`) — no HTTP, no API tokens
+   - Tool results are injected back as context and the loop continues
+   - Exits with a final response, or when safety limits are hit
 
-When explicitly enabled:
-
-1. Caller sets `agent_mode = true`
-2. SecureChatAI:
-   - Forces a JSON schema-capable model (gpt-4.1, o1, o3-mini, llama3370b)
-   - Auto-switches to `o3-mini` if the requested model doesn't support structured output
-   - Injects a router system prompt
-   - Injects a project-scoped tool catalog
-   - Enforces strict JSON schema for agent responses
-3. The model must respond with:
-   - `{"tool_call": {"name": "...", "arguments": {...}}}` for tool execution
-   - `{"final_answer": "..."}` for all other responses (including clarifications)
-4. Tool calls are:
-   - Strictly validated against registered tools
-   - Project-scoped (cannot access other projects)
+3. **Safety Limits:**
    - Step-limited (default: 8 iterations max)
    - Tool-count limited (default: 15 total tool calls max)
    - Time-limited (default: 120 second timeout)
-5. Tool results are injected back as **user context** (standard practice)
-6. The loop exits with a final response or error
+   - Tool loop detection (max 3 calls to same tool+args in last 5 steps)
+   - Tool result size capping (default: 8000 chars)
+   - Tool definition validation at load time
+
+4. **Resilience:**
+   - JSON schema enforcement with fallback to plain text
+   - Control character stripping and HTML entity decoding for REDCap responses
+   - Emergency backstop regex for truncated/malformed JSON
+   - Graceful degradation — plain text responses work even when JSON schema fails
+   - All agent errors return polite user-facing text (never leaks JSON/stack traces)
+
+5. **Observability:**
+   - `tools_used` array in response metadata (for UI indicators)
+   - Step-by-step debug traces via emLogger
+   - Dynamic max token calculation (Tiktoken-based) to prevent mid-response truncation
 
 Agent mode is:
-- Opt-in (requires `enable_agent_mode` system setting)
+- **Opt-in** (requires `enable_agent_mode` system setting)
 - Globally toggleable
 - Disabled by default
 - Fully backward compatible (non-agent calls unchanged)
-
-#### Agent Mode Hardening (2026-01-08)
-
-Recent improvements ensure production-grade reliability:
-
-**Response Handling:**
-- **JSON Schema Enforcement**: Models must return structured JSON (fallback to plain text if needed)
-- **Control Character Stripping**: Removes formatting characters that break JSON parsing
-- **HTML Entity Decoding**: Handles REDCap-encoded responses automatically
-- **Emergency Backstop Regex**: Extracts answers even from truncated/malformed JSON
-- **Model Auto-Selection**: Non-schema models auto-switch to compatible models
-- **Graceful Degradation**: Plain text responses work even when JSON schema fails
-
-**Safety Limits:**
-- **Tool Result Size Capping**: Large tool results truncated intelligently (default: 8000 chars)
-- **Tool Definition Validation**: Malformed tool configs rejected at load time with error logging
-- **Tool Loop Detection**: Prevents infinite loops (max 3 calls to same tool+args in last 5 steps)
-- **Increased Token Budget**: Agent mode uses 4000 tokens (vs 800) to prevent mid-response truncation
-
-**Observability:**
-- **Tool Usage Metadata**: Responses include which tools were used (for UI indicators)
-- **Enhanced Logging**: Step-by-step debug traces for agent execution
-- **Friendly Error Messages**: All agent errors return polite user-facing text
-
-This means agent mode can be enabled in production without breaking existing chat functionality or leaking JSON/errors to users.
 
 ---
 
@@ -215,8 +191,8 @@ $response = $em->callAI("gpt-4o", $params, $project_id);
         'total_tokens' => 170
     ],
     'tools_used' => [ // Only present in agent mode responses
-        ['name' => 'records.getUserIdByFullName', 'arguments' => ['full_name' => 'John Doe'], 'step' => 1],
-        ['name' => 'records.getClinicalData', 'arguments' => ['record_id' => '12345'], 'step' => 2]
+        ['name' => 'projects.search', 'arguments' => ['query' => 'intake'], 'step' => 1],
+        ['name' => 'records.get', 'arguments' => ['pid' => 42, 'record_id' => '1001'], 'step' => 2]
     ]
 ]
 ```
