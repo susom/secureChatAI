@@ -375,9 +375,19 @@ All tool definitions are validated at load time. Required fields:
 - `description` - Clear description of tool purpose
 - `endpoint` - Must be `module_api`, `redcap_api`, or `http`
 - `parameters` - Must be an object with `type: "object"`
-- Endpoint-specific fields:
+- Endpoint-specific routing fields:
+  - For `module_api`: `module.action` (the EM action string to call)
   - For `redcap_api`: `redcap.prefix` and `redcap.action`
-  - For `module_api`: `module.action`
+
+**Important:** Tool EM authors do **not** write `endpoint`, `module.action`, or `redcap.prefix` fields. When tools are auto-discovered from a tool EM's `agent-tool-definitions`, SecureChatAI fills these in automatically:
+
+```php
+// From discoverEmToolDefinitions() — auto-filled for every discovered tool:
+'endpoint'    => 'module_api',
+'module'      => ['prefix' => $prefix, 'action' => $def['api-action']],
+```
+
+Tool EM authors only need: `name`, `description`, `parameters`, and `api-action` (which maps to the EM's `api-actions` key). See [REDCapAgentToolTemplate](https://github.com/susom/REDCapAgentToolTemplate) for a working example.
 
 Malformed tools are rejected with error logging and will not be available to agents.
 
@@ -385,56 +395,92 @@ Malformed tools are rejected with error logging and will not be available to age
 
 ## External API Access (REDCap EM API)
 
-SecureChatAI exposes a **REDCap External Module API endpoint** for backend services.
+SecureChatAI exposes a **REDCap External Module API endpoint** for backend services and other EMs.
 
-### Supported Action
+### Supported Actions
 
-- `callAI`
+| Action | Description |
+|--------|-------------|
+| `callAI` | Simple prompt → response. Wraps a prompt into messages and calls the LLM (no agent mode). |
+| `messages` | Claude Messages API-compatible endpoint. Accepts `{model, messages, max_tokens, temperature, system, top_p, stop}`. Returns Claude-format response. |
+| `getSession` | Rehydrate a conversation session. Accepts `{session_id, project_id}`. Returns full session with messages and metadata. |
 
-### Example cURL
+### Example: `callAI` via cURL
 
 ```bash
 curl -X POST "https://redcap.stanford.edu/api/" \
-  -F "token=YOUR_API_TOKEN" \
-  -F "content=externalModule" \
-  -F "prefix=secure_chat_ai" \
-  -F "action=callAI" \
-  -F "prompt=Summarize this RAG pipeline" \
-  -F "model=deepseek" \
-  -F "format=json"
+  -d "token=YOUR_API_TOKEN" \
+  -d "content=externalModule" \
+  -d "prefix=secure_chat_ai" \
+  -d "action=callAI" \
+  -d "prompt=Summarize this RAG pipeline" \
+  -d "model=deepseek"
 ```
+
+**Note:** The `callAI` action is a simple prompt-in/response-out endpoint — it does **not** support `agent_mode`. For agentic workflows, use SecureChatAI's `callAI()` PHP method directly from another EM with `agent_mode = true` in the params.
 
 ---
 
 ## Intended Use Cases
 
-- RAG ingestion pipelines
-- Scheduled summarization jobs
-- Backend AI services running outside REDCap
-- Cloud Run / App Engine workers
+- **Agentic workflows** — LLM-driven tool use within REDCap (records, reports, escalation)
+- **Chatbot backends** — Cappy and other conversational UIs
+- **RAG pipelines** — Embedding generation and downstream summarization
+- **Standalone task agents** — Backend scripts and cron jobs calling `callAI()` with `agent_mode`
+- **External services** — Backend AI services accessing SecureChatAI via the REDCap EM API endpoint
 
 ---
 
 ## Configuration Overview
 
-Configured entirely via **System Settings**:
+All settings are configured via REDCap's External Modules system settings page.
 
-- **Model registry** (API endpoints, tokens, aliases)
-  - Each model entry specifies: alias, model ID, endpoint URL, API token, auth header name, and input variable name
-  - **AIHub models** use `api-key` as the auth header name and the AIHub subscription primary key as the API token
-  - **Legacy APIM models** use `subscription-key` or `Ocp-Apim-Subscription-Key` as the auth header name
-  - Endpoint URLs include the full path (model ID / deployment ID baked into the URL for AIHub)
-- **Default model selection**
-- **Parameter defaults** (temperature, top_p, max_tokens, etc.)
-- **Agent mode controls**:
-  - `enable_agent_mode` - Global toggle for agentic workflows
-  - `agent_max_steps` - Max reasoning iterations per request (default: 8)
-  - `agent_max_tools_per_run` - Max total tool calls before termination (default: 15)
-  - `agent_timeout_seconds` - Max wall-clock execution time (default: 120)
-  - `agent_max_tool_result_chars` - Max chars per tool result before truncation (default: 8000)
-  - `agent_router_system_prompt` - Defines agent routing behavior
-  - `agent_tool_em_prefixes` - Comma-separated EM prefixes that provide agent tools
-- **Logging and debug flags**
+### System Settings
+
+**Model Registry** (repeating sub-settings under `api-settings`):
+- `model-alias` — Internal alias used in `callAI()` (e.g., `gpt-4o`, `claude`, `deepseek`)
+- `model-id` — Provider's model ID or deployment name
+- `api-url` — Full endpoint URL (model/deployment ID baked into the URL for AIHub)
+- `api-token` — API key or subscription key
+- `api-key-var` — Auth header name (`api-key` for AIHub, `Ocp-Apim-Subscription-Key` for legacy APIM)
+- `api-input-var` — Input variable name for the request body
+- `default-model` — Checkbox to set this entry as the default model
+
+**Parameter Defaults:**
+- `gpt-temperature`, `gpt-top-p`, `gpt-frequency-penalty`, `gpt-presence-penalty`, `gpt-max-tokens`
+- `reasoning-effort` — For reasoning models (o1, o3-mini) — `low`, `medium`, `high`
+
+**Agent Mode Controls:**
+- `enable_agent_mode` — Global toggle for agentic workflows (disabled by default)
+- `agent_router_system_prompt` — System prompt that defines agent routing behavior
+- `agent_tool_em_prefixes` — Comma-separated EM prefixes that provide agent tools
+- `agent_max_steps` — Max reasoning iterations per request (default: 8)
+- `agent_max_tools_per_run` — Max total tool calls before termination (default: 15)
+- `agent_timeout_seconds` — Max wall-clock execution time (default: 120)
+- `agent_max_subagent_depth` — How many levels deep sub-agents can spawn (default: 1)
+- `agent_max_clarifications` — Max clarification requests before forcing an answer
+- `agent_max_tool_result_chars` — Max chars per tool result before truncation (default: 8000; not yet in config.json UI — set via EM settings table)
+- `pre_tool_use_hooks` — Comma-separated hook class names run before every tool call (system-wide)
+- `post_tool_use_hooks` — Comma-separated hook class names run after every tool call (system-wide)
+- `agent_tools_redcap_api_url` — REDCap API URL for `redcap_api` endpoint tools (legacy)
+- `agent_tools_project_api_key` — API token for `redcap_api` endpoint tools (legacy)
+
+**Infrastructure:**
+- `apim_dns_override_ip` — Override DNS resolution for APIM endpoints (useful in restricted networks)
+- `enable-system-debug-logging` — Toggle verbose emLogger debug output
+
+**Whisper (Audio) Settings:**
+- `whisper-language`, `whisper-temperature`, `whisper-top-p`, `whisper-n`
+- `whisper-logprobs`, `whisper-max-alternate-transcriptions`
+- `whisper-compression-rate`, `whisper-sample-rate`, `whisper-condition-on-previous-text`
+
+### Project Settings
+
+- `project_agent_tool_em_prefixes` — Project-level override for which tool EM prefixes are available (takes priority over system setting)
+- `project_pre_tool_use_hooks` / `project_post_tool_use_hooks` — Project-level hook overrides (merge with system hooks)
+- `enable-project-usage` — Enable/disable SecureChatAI for this project
+- `project-api-key` — Project-specific API key for external access
+- `project-monthly-token-limit` / `project-monthly-cost-limit` — Usage caps per project
 
 No code changes are required to add or modify models or tools.
 
