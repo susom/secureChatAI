@@ -105,10 +105,11 @@ Think of it as two things:
 2. Enable **SecureChatAI** on the target project
 3. In the project's SecureChatAI settings, set **Agent Tool EM Prefixes** to the tool EMs you want available (e.g., `redcap_agent_record_tools`)
 
-### Step 3: Enable Tool EMs on the Project
+### Step 3: Enable Tool EMs System-Wide
 
-1. Enable the tool EMs you need (e.g., **REDCapAgentRecordTools**) on the same project
-2. This allows SecureChatAI to resolve the tool EM's directory and discover its tools
+1. Enable the tool EMs you need (e.g., **REDCapAgentRecordTools**) **system-wide** in REDCap's External Modules management page (project-level enablement is not required)
+2. Add the EM prefix to SecureChatAI's `agent_tool_em_prefixes` (system) or `project_agent_tool_em_prefixes` (project) setting
+3. SecureChatAI uses `getModuleInstance()` which checks system-wide enabled versions — no project-level enable needed for tool EMs
 
 ### Step 4: For Chatbot Pattern
 
