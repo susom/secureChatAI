@@ -35,6 +35,9 @@ SecureChatAI is intentionally designed as a **shared dependency**:
 - **Chatbot EM (Cappy)**  
   → Uses SecureChatAI for all LLM calls and optional agent routing
 
+- **Agent Tool EMs** (`redcap_agent_record_tools`, `redcap_agent_rexi_tools`, etc.)  
+  → Discovered and invoked by SecureChatAI's agent loop via EM-to-EM direct PHP calls
+
 - **REDCap RAG EM**  
   → Uses SecureChatAI for embeddings and downstream generation
 
