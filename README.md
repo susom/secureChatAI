@@ -66,7 +66,13 @@ This separation ensures:
   Each AI interaction logged individually with session IDs for conversation reconstruction. System prompts and RAG are excluded (synthesized into responses).
 
 - **Optional agentic workflows**  
-  Controlled, project-scoped tool invocation with strict limits.
+  Controlled, project-scoped tool invocation with 7-phase execution pipeline, pre/post hooks, sub-agents, and safety limits.
+
+- **Conversation compaction**  
+  Tiktoken-based token estimation with automatic summarization when conversations approach context limits.
+
+- **Memory engine**  
+  Persistent entity memory with rolling summary + changelog format for cross-session continuity.
 
 - **REDCap EM API support**  
   Secure external access without exposing raw model keys.
@@ -158,6 +164,63 @@ Agent mode is:
 - Globally toggleable
 - Disabled by default
 - Fully backward compatible (non-agent calls unchanged)
+
+### 7-Phase Tool Execution Pipeline
+
+Every tool call goes through a structured pipeline (`ToolPipeline`), not a raw function call:
+
+| Phase | What Happens |
+|-------|-------------|
+| 1. **Lookup** | Find tool config in the registry by name |
+| 2. **Parse** | Validate required parameters exist |
+| 3. **Validate** | Tool-specific validation (types, ranges) |
+| 4. **PreHooks** | Run registered `PreToolUseHook` list (system + project) |
+| 5. **Permits** | If any hook returned "deny", abort before execution |
+| 6. **Execute** | Call the tool via EM-to-EM (`redcap_module_api`) |
+| 7. **PostHooks** | Run registered `PostToolUseHook` list (logging, transforms) |
+
+Errors at any phase return a `ToolResult::fail()` — the pipeline never throws.
+
+Pre/post hooks are configurable at both system and project level, and merge automatically. This lets you add audit logging, permission checks, or result transforms without modifying tool EMs.
+
+### Sub-Agents
+
+The agent can spawn independent sub-agents via the built-in `spawnAgent` tool:
+
+- Sub-agent runs a fresh agent loop with its own context
+- Scoped to a subset of tools (or all tools)
+- Reduced safety limits to prevent runaway token usage
+- Configurable depth limit (`agent_max_subagent_depth`, default: 1)
+- Useful for decomposing complex tasks (e.g., "check 3 projects" → spawn one sub-agent per project)
+
+### Conversation Compaction
+
+Long conversations can be compacted server-side via `runCompaction()`:
+
+- Tiktoken-based token estimation against the model's context window
+- When conversation exceeds 80% of context, older messages are summarized into a single message
+- Keeps the N most recent messages intact (default: 6)
+- Returns before/after stats (message count, token count, reduction %)
+- Caller EMs can call this proactively or let SecureChatAI handle it automatically
+
+### Memory Engine
+
+`MemoryEngine` provides persistent entity memory across conversations:
+
+- Maintains a "living memory document" (rolling summary + changelog)
+- Significance gate — skips trivial deltas (greetings, single-word responses)
+- LLM-powered merge: new conversation context is merged into the existing summary
+- Extracted as a reusable class for any EM that needs cross-session memory
+
+### Public Helper Methods
+
+| Method | Description |
+|--------|-------------|
+| `callAI($model, $params, $pid)` | Primary entry point for all model calls |
+| `getToolCatalogForProject($pid)` | Returns all discovered tool definitions for a project |
+| `getAvailableModels()` | Returns list of configured/available models |
+| `getModelContextWindow($model)` | Returns context window size in tokens |
+| `runCompaction($messages, $model)` | Server-side conversation compaction |
 
 ---
 
