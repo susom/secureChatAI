@@ -142,26 +142,28 @@ Think of it as two things:
 Only needed if the generic Record Tools don't cover your use case.
 
 1. Create a new EM (e.g., `redcap_agent_myproject_tools`)
-2. Add `agent-tool-definitions` to its `config.json`:
+2. Add a `tools.json` manifest:
    ```json
-   "agent-tool-definitions": [
-     {
-       "name": "myproject.doThing",
-       "description": "Does the thing for this project",
-       "api-action": "do_thing",
-       "parameters": {
-         "type": "object",
-         "properties": {
-           "input": {"type": "string", "description": "The input data"}
+   {
+     "tools": [
+       {
+         "name": "myproject.doThing",
+         "description": "Does the thing for this project",
+         "action": "do_thing",
+         "parameters": {
+           "type": "object",
+           "properties": {
+             "input": {"type": "string", "description": "The input data"}
+           },
+           "required": ["input"]
          },
-         "required": ["input"]
-       },
-       "readOnly": false,
-       "destructive": false
-     }
-   ]
+         "readOnly": false,
+         "destructive": false
+       }
+     ]
+   }
    ```
-3. Implement `redcap_module_api($action, $payload)` to handle the action
+3. Implement `handleToolCall(string $action, array $payload): array` to handle the action
 4. Add the EM prefix to the project's `project_agent_tool_em_prefixes` setting
 5. SecureChatAI auto-discovers it — no changes to SecureChatAI or any other module
 

@@ -127,7 +127,7 @@ This separation ensures:
 
 When a caller sets `agent_mode = true`, SecureChatAI becomes an agent orchestrator:
 
-1. **Tool Discovery:** Loads tool definitions from all EMs matching the configured **Agent Tool EM Prefixes** (system or project level). Each EM's `agent-tool-definitions` from config.json are read and presented to the LLM as available tools.
+1. **Tool Discovery:** Loads tool definitions from all EMs matching the configured **Agent Tool EM Prefixes** (system or project level). Each EM's `tools.json` manifest is read and presented to the LLM as available tools.
 
 2. **Agent Loop:**
    - Injects a router system prompt and project-scoped tool catalog
@@ -135,7 +135,7 @@ When a caller sets `agent_mode = true`, SecureChatAI becomes an agent orchestrat
    - The LLM responds with either:
      - `{"tool_call": {"name": "...", "arguments": {...}}}` → execute a tool
      - `{"final_answer": "..."}` → return the response to the user
-   - Tool calls are executed via **EM-to-EM direct PHP** (`getModuleInstance()->redcap_module_api()`) — no HTTP, no API tokens
+   - Tool calls are executed via **EM-to-EM direct PHP** (`getModuleInstance()->handleToolCall()`) — no HTTP, no API tokens
    - Tool results are injected back as context and the loop continues
    - Exits with a final response, or when safety limits are hit
 
@@ -176,7 +176,7 @@ Every tool call goes through a structured pipeline (`ToolPipeline`), not a raw f
 | 3. **Validate** | Tool-specific validation (types, ranges) |
 | 4. **PreHooks** | Run registered `PreToolUseHook` list (system + project) |
 | 5. **Permits** | If any hook returned "deny", abort before execution |
-| 6. **Execute** | Call the tool via EM-to-EM (`redcap_module_api`) |
+| 6. **Execute** | Call the tool via EM-to-EM (`handleToolCall`) |
 | 7. **PostHooks** | Run registered `PostToolUseHook` list (logging, transforms) |
 
 Errors at any phase return a `ToolResult::fail()` — the pipeline never throws.
@@ -356,7 +356,7 @@ $session = SecureChatLog::rehydrateSession($module, 'abc123', $project_id);
 
 ## Agent Tool Integration
 
-Tools are auto-discovered from enabled EMs whose prefix is listed in `agent_tool_em_prefixes` (system setting) or `project_agent_tool_em_prefixes` (project setting). SecureChatAI reads each EM's `agent-tool-definitions` from config.json and invokes them via direct PHP calls (EM-to-EM, no HTTP).
+Tools are auto-discovered from enabled EMs whose prefix is listed in `agent_tool_em_prefixes` (system setting) or `project_agent_tool_em_prefixes` (project setting). SecureChatAI reads each EM's `tools.json` manifest and invokes them via direct PHP calls (EM-to-EM, no HTTP).
 
 Tools are:
 
@@ -379,15 +379,15 @@ All tool definitions are validated at load time. Required fields:
   - For `module_api`: `module.action` (the EM action string to call)
   - For `redcap_api`: `redcap.prefix` and `redcap.action`
 
-**Important:** Tool EM authors do **not** write `endpoint`, `module.action`, or `redcap.prefix` fields. When tools are auto-discovered from a tool EM's `agent-tool-definitions`, SecureChatAI fills these in automatically:
+**Important:** Tool EM authors do **not** write `endpoint`, `module.action`, or `redcap.prefix` fields. When tools are auto-discovered from a tool EM's `tools.json`, SecureChatAI fills these in automatically:
 
 ```php
 // From discoverEmToolDefinitions() — auto-filled for every discovered tool:
 'endpoint'    => 'module_api',
-'module'      => ['prefix' => $prefix, 'action' => $def['api-action']],
+'module'      => ['prefix' => $prefix, 'action' => $def['action']],
 ```
 
-Tool EM authors only need: `name`, `description`, `parameters`, and `api-action` (which maps to the EM's `api-actions` key). See [REDCapAgentToolTemplate](https://github.com/susom/REDCapAgentToolTemplate) for a working example.
+Tool EM authors only need: `name`, `description`, `parameters`, and `action` (which maps to the `handleToolCall()` switch case). See [REDCapAgentToolTemplate](https://github.com/susom/REDCapAgentToolTemplate) for a working example.
 
 Malformed tools are rejected with error logging and will not be available to agents.
 

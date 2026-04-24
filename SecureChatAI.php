@@ -543,21 +543,24 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             if (empty($prefix)) continue;
 
             try {
-                $configPath = $this->getModuleDirectoryPath($prefix) . '/config.json';
-                if (!file_exists($configPath)) {
-                    $this->emDebug("Config not found for tool EM: {$prefix}");
+                $moduleDir = $this->getModuleDirectoryPath($prefix);
+
+                // Read tool definitions from tools.json manifest
+                $toolsPath = $moduleDir . '/tools.json';
+                if (!file_exists($toolsPath)) {
+                    $this->emDebug("tools.json not found for tool EM: {$prefix}");
                     continue;
                 }
 
-                $config = json_decode(file_get_contents($configPath), true);
+                $manifest = json_decode(file_get_contents($toolsPath), true);
                 if (json_last_error() !== JSON_ERROR_NONE) {
-                    $this->emError("Invalid config.json for tool EM: {$prefix}");
+                    $this->emError("Invalid tools.json for tool EM: {$prefix}");
                     continue;
                 }
 
-                $definitions = $config['agent-tool-definitions'] ?? [];
+                $definitions = $manifest['tools'] ?? [];
                 foreach ($definitions as $def) {
-                    $action = $def['api-action'] ?? '';
+                    $action = $def['action'] ?? '';
                     $tools[] = [
                         'name'        => $def['name'] ?? '',
                         'description' => $def['description'] ?? '',

@@ -102,7 +102,7 @@ Uses **Yethee\Tiktoken** library for token counting:
 
 ### Agent Tools Definition
 
-Tools are auto-discovered from EMs listed in `agent_tool_em_prefixes` (system) or `project_agent_tool_em_prefixes` (project). Each tool EM defines tools in its config.json `agent-tool-definitions` array.
+Tools are auto-discovered from EMs listed in `agent_tool_em_prefixes` (system) or `project_agent_tool_em_prefixes` (project). Each tool EM defines tools in its `tools.json` manifest.
 
 Tool definitions must have: `name`, `description`, `endpoint`, `parameters`
 - Endpoint types: `module_api` (EM-to-EM, primary), `redcap_api`, or `http`

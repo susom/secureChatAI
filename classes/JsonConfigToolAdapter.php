@@ -77,20 +77,20 @@ class JsonConfigToolAdapter implements ToolInterface
         $action = $this->config['module']['action'] ?? '';
 
         if (!empty($prefix)) {
-            // Call the target tool EM's redcap_module_api
+            // Call the target tool EM's handleToolCall
             $toolModule = \ExternalModules\ExternalModules::getModuleInstance($prefix);
             if (!$toolModule) {
                 throw new \RuntimeException("Tool module '{$prefix}' not available (not enabled?)");
             }
-            return $toolModule->redcap_module_api($action, $input);
+            return $toolModule->handleToolCall($action, $input);
         }
 
-        // Fallback: call SecureChatAI's own API (for built-in tools)
+        // Fallback: call SecureChatAI's own handleToolCall (for built-in tools)
         $module = $context->get('secure_chat_ai_instance');
         if (!$module) {
             throw new \RuntimeException("SecureChatAI instance not available in ToolContext");
         }
-        return $module->redcap_module_api($action, $input);
+        return $module->handleToolCall($action, $input);
     }
 
     private function callRedcapApi(array $input, ToolContext $context): array
