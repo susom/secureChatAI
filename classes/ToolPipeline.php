@@ -3,15 +3,14 @@
 namespace Stanford\SecureChatAI;
 
 /**
- * 7-phase tool execution pipeline.
+ * 6-phase tool execution pipeline.
  *
  * Phase 1: Lookup    — find tool in registry
  * Phase 2: Parse     — validate required fields exist
  * Phase 3: Validate  — tool-specific validation
- * Phase 4: PreHooks  — run registered PreToolUseHook list
- * Phase 5: Permits   — if hook returned "deny", abort
- * Phase 6: Execute   — call the tool
- * Phase 7: PostHooks — run registered PostToolUseHook list
+ * Phase 4: PreHooks  — run registered PreToolUseHook list; deny aborts execution
+ * Phase 5: Execute   — call the tool
+ * Phase 6: PostHooks — run registered PostToolUseHook list
  *
  * Errors at any phase are caught and returned as ToolResult::fail().
  * The pipeline never throws — callers get a ToolResult back.
@@ -65,7 +64,7 @@ class ToolPipeline
             return ToolResult::fail($validationError);
         }
 
-        // Phase 4: Pre-hooks
+        // Phase 4: Pre-hooks (deny aborts before execution)
         foreach ($this->preHooks as $hook) {
             $result = $hook->handle($use, $context);
             if ($result->decision === 'deny') {
@@ -73,9 +72,7 @@ class ToolPipeline
             }
         }
 
-        // Phase 5: Permissions (handled by pre-hooks above for now)
-
-        // Phase 6: Execute
+        // Phase 5: Execute
         try {
             $data = $tool->call($use->input, $context);
             $toolResult = ToolResult::ok($data);
@@ -83,7 +80,7 @@ class ToolPipeline
             $toolResult = ToolResult::fail($e->getMessage());
         }
 
-        // Phase 7: Post-hooks
+        // Phase 6: Post-hooks
         foreach ($this->postHooks as $hook) {
             try {
                 $hook->handle($use, $toolResult, $context);

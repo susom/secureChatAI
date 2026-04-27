@@ -66,7 +66,7 @@ This separation ensures:
   Each AI interaction logged individually with session IDs for conversation reconstruction. System prompts and RAG are excluded (synthesized into responses).
 
 - **Optional agentic workflows**  
-  Controlled, project-scoped tool invocation with 7-phase execution pipeline, pre/post hooks, sub-agents, and safety limits.
+  Controlled, project-scoped tool invocation with 6-phase execution pipeline, pre/post hooks, sub-agents, and safety limits.
 
 - **Conversation compaction**  
   Tiktoken-based token estimation with automatic summarization when conversations approach context limits.
@@ -165,23 +165,157 @@ Agent mode is:
 - Disabled by default
 - Fully backward compatible (non-agent calls unchanged)
 
-### 7-Phase Tool Execution Pipeline
+### 6-Phase Tool Execution Pipeline
 
 Every tool call goes through a structured pipeline (`ToolPipeline`), not a raw function call:
 
-| Phase | What Happens |
-|-------|-------------|
-| 1. **Lookup** | Find tool config in the registry by name |
-| 2. **Parse** | Validate required parameters exist |
-| 3. **Validate** | Tool-specific validation (types, ranges) |
-| 4. **PreHooks** | Run registered `PreToolUseHook` list (system + project) |
-| 5. **Permits** | If any hook returned "deny", abort before execution |
-| 6. **Execute** | Call the tool via EM-to-EM (`handleToolCall`) |
-| 7. **PostHooks** | Run registered `PostToolUseHook` list (logging, transforms) |
+| Phase | Name | What Happens | Extensible? |
+|-------|------|-------------|-------------|
+| 1 | **Lookup** | Find tool in the registry by name | No — automatic |
+| 2 | **Parse** | Validate required parameters exist | No — automatic |
+| 3 | **Validate** | Tool-specific input validation (types, ranges) | No — automatic |
+| 4 | **Pre-Hooks** | Run registered `PreToolUseHook` list — can audit, modify, or **deny** the call | ✅ Your code |
+| 5 | **Execute** | Call the tool via EM-to-EM (`handleToolCall`) | No — only runs if Phase 4 allows |
+| 6 | **Post-Hooks** | Run registered `PostToolUseHook` list — logging, metrics, alerts | ✅ Your code |
 
 Errors at any phase return a `ToolResult::fail()` — the pipeline never throws.
 
-Pre/post hooks are configurable at both system and project level, and merge automatically. This lets you add audit logging, permission checks, or result transforms without modifying tool EMs.
+Phases 1–3 are **built-in safety guardrails** that run automatically. The LLM cannot bypass them.  
+Phases 4 and 6 are **extensible** — any External Module can register its own hooks without modifying SecureChatAI or tool EMs.
+
+### Writing Custom Hooks
+
+Hooks let you intercept every tool call in the agent pipeline. Common use cases:
+
+- **Audit logging** — record who called what tool, when, with what arguments
+- **Blocking destructive operations** — deny `records.save` in read-only contexts
+- **Rate limiting** — track call counts and deny after a threshold
+- **Data masking** — redact sensitive fields from tool results before they reach the LLM
+- **Alerting** — notify admins when certain tools are invoked
+
+#### The Two Interfaces
+
+SecureChatAI defines two interfaces in `classes/HookInterface.php`:
+
+```php
+// Pre-hook: runs BEFORE tool execution (Phase 4)
+// Can inspect input and allow or deny the call.
+interface PreToolUseHook
+{
+    public function handle(ToolUse $use, ToolContext $context): HookResult;
+}
+
+// Post-hook: runs AFTER tool execution (Phase 6)
+// Can log results, trigger side-effects, or update metrics.
+// Cannot modify the result — it's informational only.
+interface PostToolUseHook
+{
+    public function handle(ToolUse $use, ToolResult $result, ToolContext $context): void;
+}
+```
+
+**Key objects:**
+
+| Class | What It Contains |
+|-------|-----------------|
+| `ToolUse` | `->name` (tool name), `->input` (associative array of arguments) |
+| `ToolContext` | `->projectId`, `->get($key)` / `->set($key, $val)` for passing data between phases |
+| `HookResult` | `HookResult::allow()` to proceed, `HookResult::deny($message)` to block |
+| `ToolResult` | `->isError`, `->data`, `->errorMessage` |
+
+All classes are in the `Stanford\SecureChatAI` namespace.
+
+#### Step 1: Create Your Hook Class
+
+Create a PHP file in your External Module. It must `use` the SecureChatAI interfaces:
+
+```php
+<?php
+namespace Stanford\MyCustomEM;
+
+use Stanford\SecureChatAI\PreToolUseHook;
+use Stanford\SecureChatAI\ToolUse;
+use Stanford\SecureChatAI\ToolContext;
+use Stanford\SecureChatAI\HookResult;
+
+class MyAuditHook implements PreToolUseHook
+{
+    public function handle(ToolUse $use, ToolContext $context): HookResult
+    {
+        // Log every tool call
+        error_log("Tool called: {$use->name} in project {$context->projectId}");
+
+        // Block destructive tools in certain contexts
+        $destructive = ['records.save', 'records.delete'];
+        if (in_array($use->name, $destructive, true)) {
+            return HookResult::deny("Blocked: {$use->name} is not allowed in this project");
+        }
+
+        return HookResult::allow();
+    }
+}
+```
+
+Post-hooks work the same way but cannot block — they're for observation only:
+
+```php
+<?php
+namespace Stanford\MyCustomEM;
+
+use Stanford\SecureChatAI\PostToolUseHook;
+use Stanford\SecureChatAI\ToolUse;
+use Stanford\SecureChatAI\ToolResult;
+use Stanford\SecureChatAI\ToolContext;
+
+class MyTimingHook implements PostToolUseHook
+{
+    public function handle(ToolUse $use, ToolResult $result, ToolContext $context): void
+    {
+        $status = $result->isError ? 'FAILED' : 'OK';
+        error_log("Tool {$use->name} completed: {$status}");
+    }
+}
+```
+
+#### Step 2: Register Your Hooks
+
+Hooks are registered by **fully-qualified class name** in SecureChatAI settings. Multiple hooks are comma-separated.
+
+**System-wide** (Control Center → SecureChatAI settings):
+```
+pre_tool_use_hooks  = Stanford\MyCustomEM\MyAuditHook
+post_tool_use_hooks = Stanford\MyCustomEM\MyTimingHook
+```
+
+**Per-project** (Project → External Modules → SecureChatAI settings):
+```
+project_pre_tool_use_hooks  = Stanford\MyCustomEM\MyAuditHook
+project_post_tool_use_hooks = Stanford\MyCustomEM\MyTimingHook
+```
+
+System and project hooks **merge** at runtime — project hooks run in addition to system hooks, not instead of them. This lets you have global audit logging plus project-specific governance.
+
+#### Step 3: Make Sure Your Class Is Autoloadable
+
+SecureChatAI instantiates hooks via `new $className()`. The class must be loadable at that point. REDCap's EM framework autoloads the main module class but **not** classes in subdirectories.
+
+Options:
+- Place your hook class in your EM's root directory (same level as your main module class) — REDCap will autoload it
+- Or add a `require_once` in your module's constructor for classes in `classes/` subdirectories
+
+#### How It Works at Runtime
+
+1. Agent decides to call a tool (e.g., `records.save`)
+2. SecureChatAI reads `pre_tool_use_hooks` (system) + `project_pre_tool_use_hooks` (project)
+3. Parses the comma-separated class names, instantiates each one
+4. Runs each pre-hook's `handle()` method in order
+5. If **any** hook returns `HookResult::deny()`, the tool call is **rejected** — Phase 5 (Execute) is skipped entirely
+6. If all hooks allow, the tool executes normally
+7. Post-hooks run after execution with the result (even if the tool itself errored)
+
+#### What Happens When a Hook Denies a Tool Call
+
+When a pre-hook returns `HookResult::deny("reason")`, the tool call is blocked but the **agent loop continues**. The denial message is fed back to the LLM as a tool result, so the agent can explain what happened naturally (e.g., "I tried to save the record but the operation was blocked by dry-run mode"). This is PHP code enforcement — the LLM cannot bypass, ignore, or prompt-inject past it.
 
 ### Sub-Agents
 
@@ -192,6 +326,33 @@ The agent can spawn independent sub-agents via the built-in `spawnAgent` tool:
 - Reduced safety limits to prevent runaway token usage
 - Configurable depth limit (`agent_max_subagent_depth`, default: 1)
 - Useful for decomposing complex tasks (e.g., "check 3 projects" → spawn one sub-agent per project)
+
+`spawnAgent` is a **runtime-injected tool** — it is added to the agent's tool catalog automatically when `agent_max_subagent_depth >= 1`. It does not appear in Tool Discovery or the EM tool registration system.
+
+#### How depth works
+
+The `agent_max_subagent_depth` setting controls nesting, not count:
+
+| Depth | What it means |
+|-------|--------------|
+| 0 | Sub-agents disabled (default) |
+| 1 | Parent → Children (parent can spawn multiple children, but children cannot spawn their own) |
+| 2 | Parent → Children → Grandchildren |
+
+At each level, safety limits are **halved** — if the parent has 8 max steps, each child gets 4. This prevents a parent from multiplying its budget through delegation.
+
+#### Example flow
+
+```
+Agent reasoning: "I need demographics AND clinical_data analyzed..."
+→ tool_call: spawnAgent({ prompt: "analyze demographics for project 67..." })
+→ tool_call: spawnAgent({ prompt: "analyze clinical_data for project 67..." })
+   ↳ each child runs its own agent loop with its own tool calls
+← child results bubble back up as tool results
+→ parent synthesizes both into a final answer
+```
+
+Every child agent runs through the **same hook pipeline and safety limits** as the parent — no shortcuts, no privilege escalation.
 
 ### Conversation Compaction
 

@@ -451,7 +451,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      *
      * Makes one LLM call (to generate the summary) if compaction triggers.
      */
-    public function runCompaction(array $messages, string $model, int $keepRecent = 6, ?string $summarizeModel = null): array
+    public function runCompaction(array $messages, string $model, int $keepRecent = 6, ?string $summarizeModel = null, ?int $contextWindowOverride = null): array
     {
         $params = [
             'messages'             => $messages,
@@ -464,14 +464,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $beforeText  = $this->messagesToText($messages);
         $beforeTokens = $this->estimateTokens($beforeText, $model);
 
-        $result = $this->compactMessagesIfNeeded($params, $model);
+        $result = $this->compactMessagesIfNeeded($params, $model, $contextWindowOverride);
 
         $afterMessages = $result['messages'] ?? $messages;
         $afterCount    = count($afterMessages);
         $afterText     = $this->messagesToText($afterMessages);
         $afterTokens   = $this->estimateTokens($afterText, $model);
 
-        $contextWindow = $this->getModelContextWindow($model);
+        $contextWindow = $contextWindowOverride ?? $this->getModelContextWindow($model);
         $threshold     = (int)($contextWindow * 0.8);
 
         return [
@@ -1118,6 +1118,21 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             ];
         }
 
+        // Hook denials should be fed back to the agent (not treated as fatal errors)
+        // so the agent can explain what happened to the user
+        if ($result->isError && (
+            str_contains($result->errorMessage ?? '', 'denied by hook') ||
+            str_contains($result->errorMessage ?? '', 'Blocked by')
+        )) {
+            return [
+                'error'  => false,
+                'result' => [
+                    'status'  => 'denied',
+                    'message' => $result->errorMessage,
+                ]
+            ];
+        }
+
         return $result->toArray();
     }
 
@@ -1282,7 +1297,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $result = $this->runAgentLoop(
             model: $model,
             params: $params,
-            projectId: $projectId,
+            project_id: $projectId,
             depth: $depth,
             maxDepth: $maxDepth
         );
@@ -1541,7 +1556,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      *
      * Returns updated $params with compacted messages.
      */
-    private function compactMessagesIfNeeded(array $params, string $model): array
+    private function compactMessagesIfNeeded(array $params, string $model, ?int $contextWindowOverride = null): array
     {
         if (empty($params['compact_if_needed'])) {
             return $params;
@@ -1556,9 +1571,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $messagesText = $this->messagesToText($messages);
         $currentTokens = $this->estimateTokens($messagesText, $model);
 
-        // Get context window for this model
-        $spec = $this->getModelContextSpec($model);
-        $threshold = (int) ($spec['context'] * 0.8);
+        // Get context window for this model (allow override for testing)
+        $contextWindow = $contextWindowOverride ?? ($this->getModelContextSpec($model)['context'] ?? 128000);
+        $threshold = (int) ($contextWindow * 0.8);
 
         if ($currentTokens < $threshold) {
             $this->emDebug("Compaction: skipping ({$currentTokens} tokens < {$threshold} threshold)");
@@ -1682,9 +1697,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     }
 
     private function estimateTokens(string $text, string $model): int {
-        $this->encoderProvider ??= new EncoderProvider();
-        $encoder = $this->encoderProvider->getForModel($model);
-        return count($encoder->encode($text));
+        try {
+            $this->encoderProvider ??= new EncoderProvider();
+            $encoder = $this->encoderProvider->getForModel($model);
+            return count($encoder->encode($text));
+        } catch (\Throwable $e) {
+            // Fallback for models not in tiktoken registry (e.g. llama-Maverick)
+            return (int)(mb_strlen($text) / 4);
+        }
     }
 
     private function computeDynamicMaxTokens(string $model, string $prompt): array {
