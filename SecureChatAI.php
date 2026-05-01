@@ -39,7 +39,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     private array $modelConfig = [];
     private bool $initialized = false;
     private ?EncoderProvider $encoderProvider = null;
-    public ?string $dnsOverrideIP = null;
 
     public function __construct()
     {
@@ -64,12 +63,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // Initialize the model configurations from system settings
         $apiSettings = $this->framework->getSubSettings('api-settings');
         foreach ($apiSettings as $setting) {
-            $modelAlias = $setting['model-alias'];
-            $modelID = $setting['model-id'];
+            $modelAlias = trim($setting['model-alias'] ?? '');
+            $modelID = trim($setting['model-id'] ?? '');
             $this->modelConfig[$modelAlias] = [
-                'api_url' => $setting['api-url'],
-                'api_token' => $setting['api-token'],
-                'api_key_var' => $setting['api-key-var'],
+                'api_url' => trim($setting['api-url'] ?? ''),
+                'api_token' => trim($setting['api-token'] ?? ''),
+                'api_key_var' => trim($setting['api-key-var'] ?? ''),
                 'required' => $setting['api-input-var'],
                 'model_id' => $modelID
             ];
@@ -82,9 +81,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $timeout = $this->getSystemSetting('guzzle-timeout') ? (float)(strip_tags($this->getSystemSetting('guzzle-timeout'))) : $this->getGuzzleTimeout();
         $this->setGuzzleTimeout($timeout);
         $this->guzzleClient = $this->getGuzzleClient();
-
-        // Cache DNS override so BaseModelRequest doesn't query DB on every HTTP call
-        $this->dnsOverrideIP = $this->getSystemSetting('apim_dns_override_ip') ?: null;
 
         $this->initialized = true;
     }
@@ -290,13 +286,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
 
         // Only models supporting json_schema
-        $schemaModels = ['gpt-4.1', 'o1', 'o3-mini', 'gpt-5', 'llama3370b'];
+        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'o1', 'o3', 'o3-mini', 'o4-mini'];
         if (!in_array($model, $schemaModels)) {
             unset($merged['json_schema']);
         }
 
-        // Only o1/o3-mini/gpt-5 have strict param set (use max_completion_tokens)
-        if (in_array($model, ['o1', 'o3-mini', 'gpt-5'])) {
+        // Only reasoning models have strict param set (use max_completion_tokens)
+        if (in_array($model, ['o1', 'o3-mini', 'o3', 'o4-mini', 'gpt-5'])) {
             $strict = [
                 'model' => $model,
                 'messages' => $merged['messages'] ?? [],
@@ -306,7 +302,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 $strict['reasoning_effort'] = $merged['reasoning_effort'];
             }
 
-            // Preserve json_schema for o1/o3-mini/gpt-5
+            // Preserve json_schema for reasoning models
             if (isset($merged['json_schema'])) {
                 $strict['json_schema'] = $merged['json_schema'];
             }
@@ -747,9 +743,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $tools = $this->loadToolsForProject($project_id);
 
         // Force schema-capable model for agent mode
-        $schemaModels = ['gpt-4.1', 'o1', 'o3-mini', 'gpt-5', 'llama3370b'];
+        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'o1', 'o3', 'o3-mini', 'o4-mini'];
         if (!in_array($model, $schemaModels)) {
-            $this->emDebug("Agent mode requires schema-capable model, switching from {$model} to o1");
+            $this->emDebug("Agent mode requires schema-capable model, switching from {$model} to o3-mini");
             $model = 'o3-mini'; // Default fallback for agent mode
         }
 
@@ -775,9 +771,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $start_time = time();
 
         // CRITICAL: Agent mode needs higher token limit to avoid truncation mid-JSON
-        // o1 models use max_completion_tokens, others use max_tokens
-        if (in_array($model, ['o1', 'o3-mini'])) {
-            $params['max_completion_tokens'] = 32000; // Enough for full responses
+        // Reasoning models use max_completion_tokens, others use max_tokens
+        if (in_array($model, ['o1', 'o3-mini', 'o3', 'o4-mini'])) {
+            $params['max_completion_tokens'] = 32000;
         } else {
             $params['max_tokens'] = 4000;
         }
@@ -994,60 +990,33 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $filteredParams[$paramName] = (int)$dynamicMax;
         $this->emDebug("Dynamic tokens: prompt={$promptTokens}, max={$dynamicMax} for {$model}");
 
-        switch ($model) {
-            case 'gpt-4o':
-            case 'ada-002':
-            case 'text-embedding-3-small':
-                $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                $responseData = $gpt->sendRequest($api_endpoint, $filteredParams);
-                break;
-            case 'deepseek':
-                $generic = new GenericModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
-                break;
-            case 'whisper':
-                $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                $responseData = $whisper->sendRequest($api_endpoint, $params);
-                break;
-            case 'gpt-4.1':
-            case 'o1':
-            case 'o3-mini':
-            case 'gpt-5':
-            case 'llama3370b':
-            case 'llama-Maverick':
-            case 'chat':
-            case 'gpt-4-1-nano':
-            case 'gpt-5-nano':
-            case 'grok-3-mini':
-            case 'llama-4-scout':
-            case 'o4-mini':
-                $filteredParams = $this->filterDefaultParamsForModel($model, $params);
-                $generic = new GenericModelRequest($this, $modelConfig, [], $model);
-                $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
-                $this->emDebug("RAW GenericModelRequest API RESPONSE", $responseData);
-                break;
-            case 'claude':
-            case 'claude-sonnet-3.5':
-            case 'claude-sonnet-3.7':
-            case 'claude-haiku-4.5':
-            case 'claude-opus-4':
-            case 'claude-sonnet-4':
-                $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                $responseData = $claude->sendRequest($api_endpoint, $filteredParams);
-                break;
-            case 'gemini20flash':
-            case 'gemini25pro':
-            case 'gemini-flash-lite':
-                $gemini = new GeminiModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                $responseData = $gemini->sendRequest($api_endpoint, $filteredParams);
-                break;
-            case 'gpt-4o-tts':
-            case 'tts':
-                $tts = new GPT4oMiniTTSModelRequest($this, $modelConfig, $this->defaultParams, $model);
-                $responseData = $tts->sendRequest($api_endpoint, $params);
-                break;
-            default:
-                throw new Exception("Unsupported model configuration for: $model");
+        // Route to appropriate adapter based on model alias
+        if (in_array($model, ['ada-002', 'text-embedding-3-small', 'text-embedding-3-large']) || str_contains($model, 'embed')) {
+            // Embeddings
+            $gpt = new GPTModelRequest($this, $modelConfig, $this->defaultParams, $model);
+            $responseData = $gpt->sendRequest($api_endpoint, $filteredParams);
+
+        } elseif (str_contains($model, 'whisper')) {
+            // Speech-to-text
+            $whisper = new WhisperModelRequest($this, $modelConfig, $this->defaultParams, $model);
+            $responseData = $whisper->sendRequest($api_endpoint, $params);
+
+        } elseif (str_contains($model, 'tts')) {
+            // Text-to-speech
+            $tts = new GPT4oMiniTTSModelRequest($this, $modelConfig, $this->defaultParams, $model);
+            $responseData = $tts->sendRequest($api_endpoint, $params);
+
+        } elseif (str_starts_with($model, 'claude') || str_contains($model, 'anthropic')) {
+            // Claude (Bedrock format)
+            $claude = new ClaudeModelRequest($this, $modelConfig, $this->defaultParams, $model);
+            $responseData = $claude->sendRequest($api_endpoint, $filteredParams);
+
+        } else {
+            // OpenAI-compatible chat models (Azure AI Foundry, Vertex AI, Llama, etc.)
+            $filteredParams = $this->filterDefaultParamsForModel($model, $params);
+            $generic = new GenericModelRequest($this, $modelConfig, [], $model);
+            $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
+            $this->emDebug("RAW GenericModelRequest API RESPONSE", $responseData);
         }
 
         $normalizedResponse = $this->normalizeResponse($responseData, $model);
@@ -1621,7 +1590,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         try {
             // Use correct token param for this model
-            $o1Models = ['o1', 'o3-mini', 'o4-mini'];
+            $o1Models = ['o1', 'o3-mini', 'o3', 'o4-mini'];
             $tokenParam = in_array($summarizeModel, $o1Models)
                 ? 'max_completion_tokens'
                 : 'max_tokens';
@@ -1679,19 +1648,37 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     {
         $specs = [
             'o1'               => ['context' => 200000],
-            'gpt-4.1'          => ['context' => 1000000],
+            'o3'               => ['context' => 200000],
             'o3-mini'          => ['context' => 200000],
-            'gpt-5'            => ['context' => 400000],
             'o4-mini'          => ['context' => 200000],
+            'gpt-4o'           => ['context' => 128000],
+            'gpt-4-1'          => ['context' => 1000000],
+            'gpt-4-1-nano'     => ['context' => 1000000],
+            'gpt-5'            => ['context' => 400000],
+            'gpt-5-4'          => ['context' => 400000],
+            'gpt-5-4-nano'     => ['context' => 400000],
+            'gpt-5-nano'       => ['context' => 400000],
+            'grok-3'           => ['context' => 128000],
+            'grok-3-mini'      => ['context' => 128000],
+            'deepseek'         => ['context' => 128000],
+            'deepseek-r1'      => ['context' => 128000],
             'claude'           => ['context' => 200000],
             'claude-sonnet-3.5' => ['context' => 200000],
             'claude-sonnet-3.7' => ['context' => 200000],
+            'claude-haiku'     => ['context' => 200000],
             'claude-haiku-4.5' => ['context' => 200000],
             'claude-opus-4'    => ['context' => 200000],
+            'claude-opus-4-1'  => ['context' => 200000],
+            'claude-opus-4-6'  => ['context' => 200000],
+            'claude-opus-4-7'  => ['context' => 200000],
             'claude-sonnet-4'  => ['context' => 200000],
-            'gemini20flash'    => ['context' => 1000000],
+            'claude-sonnet-4-5' => ['context' => 200000],
+            'claude-sonnet-4-6' => ['context' => 200000],
+            'gemini-2.5-pro'   => ['context' => 1000000],
+            'gemini-2.5-flash' => ['context' => 1000000],
             'llama3370b'       => ['context' => 128000],
-            'deepseek'         => ['context' => 128000],
+            'llama-Maverick'   => ['context' => 128000],
+            'llama-4-scout'    => ['context' => 128000],
         ];
         return $specs[$model] ?? ['context' => 128000];
     }
@@ -1715,11 +1702,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'param' => 'max_completion_tokens',
                 'buffer' => 25000
             ],
-            'gpt-4.1' => [
-                'context' => 1000000,
-                'output_max' => 128000,
-                'param' => 'max_tokens',
-                'buffer' => 2000
+            'o3' => [
+                'context' => 200000,
+                'output_max' => 100000,
+                'param' => 'max_completion_tokens',
+                'buffer' => 25000
             ],
             'o3-mini' => [
                 'context' => 200000,
@@ -1727,17 +1714,41 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'param' => 'max_completion_tokens',
                 'buffer' => 25000
             ],
+            'o4-mini' => [
+                'context' => 200000,
+                'output_max' => 100000,
+                'param' => 'max_completion_tokens',
+                'buffer' => 25000
+            ],
+            'gpt-4-1' => [
+                'context' => 1000000,
+                'output_max' => 128000,
+                'param' => 'max_tokens',
+                'buffer' => 2000
+            ],
+            'gpt-4-1-nano' => [
+                'context' => 1000000,
+                'output_max' => 128000,
+                'param' => 'max_tokens',
+                'buffer' => 2000
+            ],
             'gpt-5' => [
                 'context' => 400000,
                 'output_max' => 128000,
                 'param' => 'max_tokens',
                 'buffer' => 2000
             ],
-            'o4-mini' => [
-                'context' => 200000,
-                'output_max' => 100000,
-                'param' => 'max_completion_tokens',
-                'buffer' => 25000
+            'gpt-5-4' => [
+                'context' => 400000,
+                'output_max' => 128000,
+                'param' => 'max_tokens',
+                'buffer' => 2000
+            ],
+            'gpt-5-4-nano' => [
+                'context' => 400000,
+                'output_max' => 128000,
+                'param' => 'max_tokens',
+                'buffer' => 2000
             ],
             'claude' => [
                 'context' => 200000,
@@ -1777,7 +1788,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             ]
         ];
         $spec = $modelSpecs[$model] ?? null;
-        if($model == "gemini20flash") return ['max_tokens', 8192, 0];
         if (!$spec) return ['max_tokens', 16384, 0];
 
         $promptTokens = $this->estimateTokens($prompt, $model);
@@ -1845,12 +1855,12 @@ private function toOpenAIToolsShape(array $tools): array
         ]);
 
         // Embedding models return their own format - pass through unchanged
-        if ($model === 'ada-002' || $model === 'text-embedding-3-small') {
+        if (str_contains($model, 'embed') || $model === 'ada-002') {
             $this->emDebug("Passing through embedding response unchanged for model: {$model}");
             return $response;
         }
 
-        if (str_starts_with($model, 'claude')) {
+        if (str_starts_with($model, 'claude') || str_contains($model, 'anthropic')) {
             $normalized['content'] = $response['content'][0]['text'] ?? '';
             $normalized['role'] = $response['role'] ?? 'assistant';
             $normalized['model'] = $response['model'] ?? 'claude';
@@ -1859,10 +1869,12 @@ private function toOpenAIToolsShape(array $tools): array
                 'completion_tokens' => $response['usage']['output_tokens'] ?? 0,
                 'total_tokens' => ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0)
             ];
-        } elseif (in_array($model, [
-            'o1', 'o3-mini', 'gpt-4o', 'gpt-5', 'llama3370b', 'gpt-4.1', 'llama-Maverick', 'deepseek',
-            'chat', 'gpt-4-1-nano', 'gpt-5-nano', 'grok-3-mini', 'llama-4-scout', 'o4-mini'
-        ])) {
+        } elseif (str_contains($model, 'tts')) {
+            $normalized['audio_base64'] = $response['audio_base64'] ?? '';
+            $normalized['content_type'] = $response['content_type'] ?? 'audio/mpeg';
+            $normalized['model'] = $model;
+        } elseif (isset($response['choices'][0]['message']['content'])) {
+            // OpenAI-compatible format (catches all chat models dynamically)
             $normalized['content'] = $response['choices'][0]['message']['content'] ?? '';
             $decoded = json_decode($normalized['content'], true);
             if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
@@ -1876,34 +1888,6 @@ private function toOpenAIToolsShape(array $tools): array
                 'completion_tokens' => $response['usage']['completion_tokens'] ?? 0,
                 'total_tokens' => $response['usage']['total_tokens'] ?? 0
             ];
-        } elseif (in_array($model, [
-             'gemini20flash', 'gemini25pro', 'gemini-flash-lite'
-        ])) {
-            $contentParts = [];
-            foreach ($response as $chunk) {
-                $parts = $chunk['candidates'][0]['content']['parts'] ?? [];
-                foreach ($parts as $part) {
-                    if (!empty($part['text'])) {
-                        $contentParts[] = $part['text'];
-                    }
-                }
-            }
-            $normalized['content'] = implode(" ", $contentParts);
-            $normalized['role'] = $response[0]['candidates'][0]['content']['role'] ?? "model";
-            $normalized['model'] = $response[0]['modelVersion'] ?? $model;
-
-            $usage = end($response)['usageMetadata'] ?? [];
-            $normalized['usage'] = [
-                'prompt_tokens' => $usage['promptTokenCount'] ?? 0,
-                'completion_tokens' => $usage['candidatesTokenCount'] ?? 0,
-                'total_tokens' => $usage['totalTokenCount'] ?? 0
-            ];
-        } elseif ($model === 'gpt-4o-tts' || $model === 'tts') {
-            // Example: Your TTSModelRequest returns audio_base64 and content_type fields.
-            $normalized['audio_base64'] = $response['audio_base64'] ?? '';
-            $normalized['content_type'] = $response['content_type'] ?? 'audio/mpeg';
-            $normalized['model'] = $model;
-            // Add any other relevant info
         } else {
             $normalized = $response;
         }
@@ -2166,8 +2150,8 @@ private function toOpenAIToolsShape(array $tools): array
                 $modelMap = [
                     'claude-3-7-sonnet-20250219' => 'claude',
                     'claude-3-5-sonnet-20241022' => 'claude',
-                    'claude-sonnet-4' => 'claude',
-                    'gpt-4.1' => 'gpt-4.1',
+                    'claude-sonnet-4' => 'claude-sonnet-4',
+                    'gpt-4-1' => 'gpt-4-1',
                     'o1' => 'o1',
                     'o3-mini' => 'o3-mini',
                     'gpt-5' => 'gpt-5',

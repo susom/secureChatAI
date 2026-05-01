@@ -34,12 +34,16 @@ class ClaudeModelRequest extends BaseModelRequest
             $payload['system'] = $system;
         }
 
-        // Optional parameters
-        if (isset($params['temperature']) || isset($this->defaultParams['temperature'])) {
-            $payload['temperature'] = (float)($params['temperature'] ?? $this->defaultParams['temperature']);
-        }
-        if (isset($params['top_p']) || isset($this->defaultParams['top_p'])) {
-            $payload['top_p'] = (float)($params['top_p'] ?? $this->defaultParams['top_p']);
+        // Optional sampling parameters
+        // - Opus models deprecate temperature/top_p entirely
+        // - Other Claude models allow one but not both
+        $isOpus = str_contains($this->modelId, 'opus');
+        if (!$isOpus) {
+            if (isset($params['temperature']) || isset($this->defaultParams['temperature'])) {
+                $payload['temperature'] = (float)($params['temperature'] ?? $this->defaultParams['temperature']);
+            } elseif (isset($params['top_p']) || isset($this->defaultParams['top_p'])) {
+                $payload['top_p'] = (float)($params['top_p'] ?? $this->defaultParams['top_p']);
+            }
         }
 
         $postfields = json_encode($payload);
@@ -48,13 +52,6 @@ class ClaudeModelRequest extends BaseModelRequest
             "Content-Type: application/json",
             "{$this->auth_key_name}: {$this->apiKey}"
         ];
-
-        $this->module->emDebug("Sending ClaudeModelRequest (Bedrock)", [
-            'endpoint' => $apiEndpoint,
-            'model_id' => $this->modelId,
-            'message_count' => count($messages),
-            'has_system' => !empty($system)
-        ]);
 
         $rawResponse = $this->executeAPICall($apiEndpoint, $postfields, $headers);
         return json_decode($rawResponse, true);
