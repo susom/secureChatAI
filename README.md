@@ -295,6 +295,15 @@ project_post_tool_use_hooks = Stanford\MyCustomEM\MyTimingHook
 
 System and project hooks **merge** at runtime — project hooks run in addition to system hooks, not instead of them. This lets you have global audit logging plus project-specific governance.
 
+**Multiple EMs with hooks:** If two or more EMs each ship their own hook classes, just comma-delimit them. Hooks execute in the order listed — if any pre-hook denies, the tool is blocked regardless of what later hooks would say:
+
+```
+project_pre_tool_use_hooks  = Stanford\EMOne\AuditHook, Stanford\EMTwo\ComplianceHook
+project_post_tool_use_hooks = Stanford\EMOne\TimingHook, Stanford\EMTwo\LoggingHook
+```
+
+Registration is opt-in per project. An EM being enabled doesn't auto-register its hooks — you explicitly choose which hooks are active in settings. Remove a class name to disable it without touching code.
+
 #### Step 3: Make Sure Your Class Is Autoloadable
 
 SecureChatAI instantiates hooks via `new $className()`. The class must be loadable at that point. REDCap's EM framework autoloads the main module class but **not** classes in subdirectories.
