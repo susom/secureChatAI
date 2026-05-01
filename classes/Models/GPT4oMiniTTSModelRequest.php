@@ -37,6 +37,18 @@ class GPT4oMiniTTSModelRequest extends BaseModelRequest
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HEADER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+
+        // Apply DNS override if configured (for site-to-site VPN routing)
+        $dnsOverrideIp = $this->module->getSystemSetting('apim_dns_override_ip');
+        if (!empty($dnsOverrideIp)) {
+            $host = parse_url($apiEndpoint, PHP_URL_HOST);
+            $port = parse_url($apiEndpoint, PHP_URL_PORT) ?: 443;
+            if ($host) {
+                curl_setopt($ch, CURLOPT_RESOLVE, ["{$host}:{$port}:{$dnsOverrideIp}"]);
+            }
+        }
 
         $response = curl_exec($ch);
 
