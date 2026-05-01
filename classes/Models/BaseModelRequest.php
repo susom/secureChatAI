@@ -67,6 +67,7 @@ abstract class BaseModelRequest implements ModelInterface {
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
 
         // Apply DNS override if configured (for site-to-site VPN routing)
         $dnsOverrideIp = $this->module->getSystemSetting('apim_dns_override_ip');
