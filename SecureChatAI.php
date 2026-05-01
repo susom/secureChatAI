@@ -2025,11 +2025,21 @@ private function toOpenAIToolsShape(array $tools): array
     public function getGuzzleClient()
     {
         if (!$this->guzzleClient) {
-            $this->guzzleClient = new Client([
+            $options = [
                 'timeout' => 30,
                 'connect_timeout' => 10,
                 'verify' => false
-            ]);
+            ];
+
+            // Apply DNS override if configured (for site-to-site VPN routing)
+            $dnsOverrideIp = $this->getSystemSetting('apim_dns_override_ip');
+            if (!empty($dnsOverrideIp)) {
+                $options['curl'] = [
+                    CURLOPT_RESOLVE => ["aihubapi.stanfordhealthcare.org:443:{$dnsOverrideIp}"],
+                ];
+            }
+
+            $this->guzzleClient = new Client($options);
         }
         return $this->guzzleClient;
     }
