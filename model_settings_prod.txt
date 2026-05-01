@@ -1,0 +1,114 @@
+=== SecureChatAI Model Settings (Prod - 2026-05-01) ===
+
+All models use:
+  API Token: c13252d4750749bba237c4f867384e73
+  API Key Var: api-key
+
+--- Model 1 ---
+Alias: claude-sonnet-4.6
+Model ID: us.anthropic.claude-sonnet-4-6
+API URL: https://aihubapi.stanfordhealthcare.org/aws-bedrock/model/us.anthropic.claude-sonnet-4-6/invoke
+API Input Var: messages
+Default: no
+
+--- Model 2 ---
+Alias: claude-opus-4-7
+Model ID: us.anthropic.claude-opus-4-7
+API URL: https://aihubapi.stanfordhealthcare.org/aws-bedrock/model/us.anthropic.claude-opus-4-7/invoke
+API Input Var: messages
+Default: no
+
+--- Model 3 ---
+Alias: gemini-2.5-flash
+Model ID: google/gemini-2.5-flash
+API URL: https://aihubapi.stanfordhealthcare.org/gcp-vertex-ai/endpoints/openapi/chat/completions
+API Input Var: messages
+Default: no
+
+--- Model 4 ---
+Alias: gemini-2.5-pro
+Model ID: google/gemini-2.5-pro
+API URL: https://aihubapi.stanfordhealthcare.org/gcp-vertex-ai/endpoints/openapi/chat/completions
+API Input Var: messages
+Default: no
+
+--- Model 5 ---
+Alias: deepseek-r1
+Model ID: deepseek-r1
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/deepseek-r1/chat/completions?api-version=2024-06-01
+API Input Var: messages
+Default: no
+
+--- Model 6 ---
+Alias: gpt-4-1
+Model ID: gpt-4-1
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/gpt-4-1/chat/completions?api-version=2024-06-01
+API Input Var: messages
+Default: YES
+
+--- Model 7 ---
+Alias: gpt-4-1-nano
+Model ID: gpt-4-1-nano
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/gpt-4-1-nano/chat/completions?api-version=2024-06-01
+API Input Var: messages
+Default: no
+
+--- Model 8 ---
+Alias: gpt-5-4
+Model ID: gpt-5-4
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/gpt-5-4/chat/completions?api-version=2024-06-01
+API Input Var: messages
+Default: no
+
+--- Model 9 ---
+Alias: gpt-5-4-nano
+Model ID: gpt-5-4-nano
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/gpt-5-4-nano/chat/completions?api-version=2024-06-01
+API Input Var: messages
+Default: no
+
+--- Model 10 ---
+Alias: o3
+Model ID: o3
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/o3/chat/completions?api-version=2024-12-01-preview
+API Input Var: messages
+Default: no
+
+--- Model 11 ---
+Alias: o4-mini
+Model ID: o4-mini
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/o4-mini/chat/completions?api-version=2024-12-01-preview
+API Input Var: messages
+Default: no
+
+--- Model 12 ---
+Alias: text-embedding-3-small
+Model ID: text-embedding-3-small
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/text-embedding-3-small/embeddings?api-version=2024-06-01
+API Input Var: input
+Default: no
+
+--- Model 13 ---
+Alias: text-embedding-3-large
+Model ID: text-embedding-3-large
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/text-embedding-3-large/embeddings?api-version=2024-06-01
+API Input Var: input
+Default: no
+
+--- Model 14 ---
+Alias: tts-hd
+Model ID: tts-hd
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/tts-hd/audio/speech?api-version=2024-12-01-preview
+API Input Var: input
+Default: no
+
+--- Model 15 ---
+Alias: whisper
+Model ID: whisper
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/whisper/audio/transcriptions?api-version=2024-06-01
+API Input Var: file
+Default: no
+
+=== Other Settings ===
+Reasoning Effort: low
+DNS Override IP: (leave empty unless on site-to-site VPN)
