@@ -65,32 +65,22 @@ class GenericModelRequest extends BaseModelRequest
 
         // Fix empty arrays before encoding to prevent [] instead of {}
         $mergedParams = $this->fixEmptyArrays($mergedParams);
-
-        // $this->module->emDebug("SENDING TO API (after fixEmptyArrays)", $mergedParams);
         $postfields = json_encode($mergedParams);
 
         // Dynamically decide if the key should be in header or query string
         $keyHeaderName = $this->auth_key_name;
         $headers = ["Content-Type: application/json", "Accept: application/json"];
 
-        if (str_starts_with(strtolower($keyHeaderName), 'ocp-') || str_contains($keyHeaderName, 'Subscription')) {
-            // Azure-style: send as header
+        if (str_starts_with(strtolower($keyHeaderName), 'ocp-') || str_contains($keyHeaderName, 'Subscription') || strtolower($keyHeaderName) === 'api-key') {
+            // Send as header (Azure APIM, AI Hub, etc.)
             $headers[] = "$keyHeaderName: {$this->apiKey}";
         } else {
-            // Legacy OpenAI style: send as query string
+            // Legacy style: send as query string
             $separator = str_contains($apiEndpoint, '?') ? '&' : '?';
             $apiEndpoint .= "{$separator}{$keyHeaderName}={$this->apiKey}";
         }
 
-        // DEBUG: Log json_encode result (false = invalid UTF-8 or other encoding issue)
-        if ($postfields === false) {
-            $this->module->emDebug("DEBUG_GENERIC: json_encode FAILED", json_last_error_msg());
-        }
-
         $rawResponse = $this->executeAPICall($apiEndpoint, $postfields, $headers);
-
-        // DEBUG: Log raw API response before json_decode
-        $this->module->emDebug("DEBUG_GENERIC_RAW_RESPONSE", substr($rawResponse, 0, 1000));
 
         return json_decode($rawResponse, true);
     }

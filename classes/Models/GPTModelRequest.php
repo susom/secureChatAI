@@ -48,9 +48,9 @@ class GPTModelRequest extends BaseModelRequest {
      */
     private function shouldUseHeaderAuth(): bool
     {
-        // APIM endpoints use header-based auth (Ocp-Apim-Subscription-Key)
-        // Legacy endpoints use query-param auth (api-key, subscription-key, etc.)
-        return str_contains(strtolower($this->auth_key_name), 'ocp-apim');
+        // AI Hub and APIM endpoints use header-based auth
+        $name = strtolower($this->auth_key_name);
+        return str_contains($name, 'ocp-apim') || $name === 'api-key';
     }
 
     /**

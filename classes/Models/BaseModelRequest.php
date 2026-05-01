@@ -21,10 +21,10 @@ abstract class BaseModelRequest implements ModelInterface {
 
     public function __construct($module, array $modelConfig, array $defaultParams, string $model) {
         $this->module = $module;
-        $this->apiEndpoint = $modelConfig['api_url'];
-        $this->apiKey = $modelConfig['api_token'];
-        $this->modelId = $modelConfig['model_id'];
-        $this->auth_key_name = $modelConfig['api_key_var'];
+        $this->apiEndpoint = trim($modelConfig['api_url']);
+        $this->apiKey = trim($modelConfig['api_token']);
+        $this->modelId = trim($modelConfig['model_id']);
+        $this->auth_key_name = trim($modelConfig['api_key_var']);
         $this->defaultParams = $defaultParams;
         $this->model = $model;
     }
@@ -51,39 +51,21 @@ abstract class BaseModelRequest implements ModelInterface {
         return [];
     }
 
-//    public function sendRequest(string $apiEndpoint, array $params): array {
-//        // Common API execution logic (e.g., using cURL)
-//        $apiEndpoint .= (!str_contains($apiEndpoint, '?') ? '?' : '&') . "$this->auth_key_name=$this->apiKey";
-//        $mergedParams = array_merge($this->defaultParams, $params);
-//        unset($mergedParams["reasoning_effort"]);
-//        $data = json_encode($mergedParams) ?? [];
-//
-//        $responseData = $this->module->executeApiCall($apiEndpoint, $this->headers, $data);
-//
-//        return $responseData; // Replace with actual API call logic
-//    }
-
     /**
      * @throws Exception
      */
     public function executeAPICall(string $apiEndpoint, string|array $params, array $headers = null): string {
+        // Sanitize URL: strip any non-printable/invisible characters
+        $apiEndpoint = preg_replace('/[^\x20-\x7E]/', '', $apiEndpoint);
+        $apiEndpoint = trim($apiEndpoint);
+
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $apiEndpoint);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers ?? $this->headers);
-
-        //TODO INcorporate per model timeout??
         curl_setopt($ch, CURLOPT_TIMEOUT, 500);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
-
-        // Apply DNS override if configured (cached at init; needed for prod site-to-site VPN)
-        if (!empty($this->module->dnsOverrideIP)) {
-            curl_setopt($ch, CURLOPT_RESOLVE, [
-                "apim.stanfordhealthcare.org:443:{$this->module->dnsOverrideIP}",
-                "aihubapi.stanfordhealthcare.org:443:{$this->module->dnsOverrideIP}"
-            ]);
-        }
 
         $response = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);

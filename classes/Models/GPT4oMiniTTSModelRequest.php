@@ -19,7 +19,7 @@ class GPT4oMiniTTSModelRequest extends BaseModelRequest
         $payload = json_encode($data);
 
         $headers = [
-            "Ocp-Apim-Subscription-Key: {$this->apiKey}",
+            "{$this->auth_key_name}: {$this->apiKey}",
             "Content-Type: application/json",
         ];
 
