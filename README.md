@@ -4,7 +4,7 @@ SecureChatAI is a **service-oriented REDCap External Module** that provides a un
 
 It acts as the **foundational AI runtime layer** for the REDCap AI ecosystem, enabling chatbots, RAG pipelines, background jobs, and agentic workflows to access multiple LLM providers through a single, auditable interface.
 
-**Requires network access to Stanford AI endpoints** (via AIHub gateway or legacy APIM; VPN may be required depending on environment).
+**Requires network access to Stanford AI Hub endpoints** (`aihubapi.stanfordhealthcare.org`; VPN may be required depending on environment).
 
 ---
 
@@ -86,24 +86,21 @@ This separation ensures:
 **Via AIHub — Azure AI Foundry:**
 - `chat`, `gpt-4-1-nano`, `gpt-5-nano`, `grok-3-mini`, `llama-4-scout`, `o4-mini`
 
-**Via AIHub — AWS Bedrock:**
-- `claude-sonnet-3.5`, `claude-sonnet-3.7`, `claude-haiku-4.5`, `claude-opus-4`, `claude-sonnet-4`
+**Via AI Hub — AWS Bedrock (Claude):**
+- `claude-haiku-4.5`, `claude-opus-4-1`, `claude-opus-4-6`, `claude-opus-4-7`, `claude-sonnet-4-5`, `claude-sonnet-4-6`
 
-**Via AIHub — Google Vertex AI:**
-- `gemini-flash-lite`
+**Via AI Hub — Google Vertex AI:**
+- `gemini-2.5-flash`, `gemini-2.5-pro`
 
-**Via legacy APIM (or AIHub Azure AI Foundry):**
-- `gpt-4o`, `gpt-4.1`, `o1`, `o3-mini`, `gpt-5`
-- `llama3370b`, `llama-Maverick`, `deepseek`
-- `claude` (legacy APIM proxy — use Bedrock aliases for AIHub)
-- `gemini20flash`, `gemini25pro`
+**Via AI Hub — Azure AI Foundry:**
+- `deepseek-r1`, `gpt-4-1`, `gpt-4-1-nano`, `gpt-5-4`, `gpt-5-4-nano`, `grok-3`, `o3`, `o4-mini`
 
 ### Embeddings
-- `ada-002`, `text-embedding-3-small`
+- `text-embedding-3-small`, `text-embedding-3-large`
 
 ### Audio / Speech
 - `whisper`
-- `gpt-4o-tts`, `tts`
+- `tts-hd`
 
 ---
 
@@ -116,7 +113,7 @@ This separation ensures:
    - Applies defaults
    - Filters unsupported parameters
    - Selects the correct model adapter
-3. **Model request is executed** via Stanford AIHub gateway (AWS Bedrock, Google Vertex AI, or Azure AI Foundry) or legacy APIM endpoint.
+3. **Model request is executed** via Stanford AI Hub gateway (AWS Bedrock, Google Vertex AI, or Azure AI Foundry).
 4. **Response is normalized** into a common format.
 5. **Usage and metadata are logged** for audit and monitoring.
 6. **Normalized response is returned** to the caller.
@@ -612,13 +609,13 @@ All settings are configured via REDCap's External Modules system settings page.
 - `model-id` — Provider's model ID or deployment name
 - `api-url` — Full endpoint URL (model/deployment ID baked into the URL for AIHub)
 - `api-token` — API key or subscription key
-- `api-key-var` — Auth header name (`api-key` for AIHub, `Ocp-Apim-Subscription-Key` for legacy APIM)
+- `api-key-var` — Auth header name (use `api-key` for AI Hub)
 - `api-input-var` — Input variable name for the request body
 - `default-model` — Checkbox to set this entry as the default model
 
 **Parameter Defaults:**
 - `gpt-temperature`, `gpt-top-p`, `gpt-frequency-penalty`, `gpt-presence-penalty`, `gpt-max-tokens`
-- `reasoning-effort` — For reasoning models (o1, o3-mini) — `low`, `medium`, `high`
+- `reasoning-effort` — For reasoning models (o1, o3-mini, o3, o4-mini) — `low`, `medium`, `high`
 
 **Agent Mode Controls:**
 - `enable_agent_mode` — Global toggle for agentic workflows (disabled by default)
@@ -636,7 +633,6 @@ All settings are configured via REDCap's External Modules system settings page.
 - `agent_tools_project_api_key` — API token for `redcap_api` endpoint tools (legacy)
 
 **Infrastructure:**
-- `apim_dns_override_ip` — Override DNS resolution for APIM endpoints (useful in restricted networks)
 - `enable-system-debug-logging` — Toggle verbose emLogger debug output
 
 **Whisper (Audio) Settings:**

@@ -4,34 +4,39 @@
 - Use Haiku 4.5 unless explicitly told "use sonnet" or "use opus"
 
 ## What this is
--
+- SecureChatAI: REDCap External Module providing unified AI gateway to Stanford AI Hub
 
 ## Tech stack
-- Frontend:
-- Backend:
-- Build/tooling:
-- Hosting/deploy:
-- Local dev (how to run):
+- Frontend: PHP/JS (REDCap EM pages)
+- Backend: PHP 8.x, Guzzle HTTP, yethee/tiktoken
+- Build/tooling: Composer
+- Hosting/deploy: REDCap server (Stanford)
+- Local dev (how to run): REDCap local instance + VPN to Stanford AI Hub
 
 ## Repo layout (key folders)
 - /
-  - Frontend:
-  - Backend:
-  - Shared:
-  - Infra:
+  - Frontend: pages/
+  - Backend: SecureChatAI.php, classes/Models/
+  - Shared: emLoggerTrait.php
+  - Infra: config.json, composer.json
 
 ## Current state
 ### Working / shipped
--
+- All AI Hub models operational (Claude Bedrock, GPT Azure, Gemini Vertex, embeddings, whisper, TTS)
+- Pattern-based model routing and response normalization
+- Agent mode with tool orchestration
+- Session logging and rehydration
 
 ### In progress
--
+- Nothing active
 
 ### Known issues
--
+- grok-3: "Model service is unavailable" on AI Hub side (not code issue)
+- Gemini access may require explicit subscription activation per product tier
 
 ## Roadmap / TODO
--
+- Per-model timeout configuration
+- Streaming response support
 
 ## Guardrails (important)
 - Make small, reviewable diffs (avoid sweeping refactors unless asked)
