@@ -271,10 +271,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     private function filterDefaultParamsForModel($model, $params)
     {
         // Embedding models don't use chat defaultParams
-        if ($model === 'ada-002' || $model === 'text-embedding-3-small') {
-            return array_merge([
+        if ($model === 'ada-002' || $model === 'text-embedding-3-small' || $model === 'text-embedding-3-large') {
+            $embedParams = array_merge([
                 'model' => $this->modelConfig[$model]['model_id'] ?? $model
             ], $params);
+            unset($embedParams['session_id'], $embedParams['agent_mode'], $embedParams['project_id']);
+            return $embedParams;
         }
 
         $merged = array_merge($this->defaultParams, $params);
@@ -311,6 +313,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         // Remove max_tokens for all non-o1/o3-mini
         unset($merged['max_tokens']);
+
+        // Strip internal/meta params that are not part of the API contract
+        unset($merged['session_id'], $merged['agent_mode'], $merged['project_id']);
 
         return $merged;
     }
