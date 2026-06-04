@@ -11,14 +11,17 @@ namespace Stanford\SecureChatAI;
 class ToolContext
 {
     public readonly ?int $projectId;
+    public readonly ?string $username;
     public readonly AbortController $abortController;
     private array $metadata = [];
 
     public function __construct(
         ?int $projectId = null,
+        ?string $username = null,
         ?AbortController $abortController = null
     ) {
         $this->projectId = $projectId;
+        $this->username  = $username;
         $this->abortController = $abortController ?? new AbortController();
     }
 

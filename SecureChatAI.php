@@ -320,7 +320,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return $merged;
     }
 
-    public function callAI($model, $params = [], $project_id = null)
+    public function callAI($model, $params = [], $project_id = null, $username = null)
     {
         $startTotal = microtime(true);
         $retries = 2;
@@ -345,7 +345,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     $response = $this->runAgentLoop(
                         model: $model,
                         params: $params,
-                        project_id: $project_id
+                        project_id: $project_id,
+                        username: $username
                     );
                     $this->emDebug("callAI timing - runAgentLoop", [
                         'duration_ms' => round((microtime(true) - $startAgentLoop) * 1000, 2)
@@ -527,17 +528,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      */
     private function discoverEmToolDefinitions(?int $pid = null): array
     {
-        // Project-level prefixes take priority over system-level
-        $prefixesRaw = null;
-        if (!empty($pid)) {
-            $prefixesRaw = $this->getProjectSetting('project_agent_tool_em_prefixes', $pid);
-        }
-        if (empty($prefixesRaw)) {
-            $prefixesRaw = $this->getSystemSetting('agent_tool_em_prefixes');
-        }
-        if (empty($prefixesRaw)) return [];
+        // Union of system-level (everyone gets) + project-level (this project only)
+        $systemRaw  = $this->getSystemSetting('agent_tool_em_prefixes') ?? '';
+        $projectRaw = (!empty($pid)) ? ($this->getProjectSetting('project_agent_tool_em_prefixes', $pid) ?? '') : '';
 
-        $prefixes = array_map('trim', explode(',', $prefixesRaw));
+        $systemPrefixes  = $systemRaw  ? array_map('trim', explode(',', $systemRaw))  : [];
+        $projectPrefixes = $projectRaw ? array_map('trim', explode(',', $projectRaw)) : [];
+        $prefixes = array_values(array_unique(array_filter(array_merge($systemPrefixes, $projectPrefixes))));
         $tools = [];
 
         foreach ($prefixes as $prefix) {
@@ -742,7 +739,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         return $messages;
     }
 
-    private function runAgentLoop(string $model, array $params, ?int $project_id, int $depth = 0, int $maxDepth = 1): array
+    private function runAgentLoop(string $model, array $params, ?int $project_id, ?string $username = null, int $depth = 0, int $maxDepth = 1): array
     {
         $messages = $params['messages'] ?? [];
         $tools = $this->loadToolsForProject($project_id);
@@ -885,7 +882,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     arguments: $arguments,
                     tools: $tools,
                     project_id: $project_id,
-                    model: $model
+                    model: $model,
+                    username: $username
                 );
 
                 // Return errors immediately (but not MISSING_PARAMETERS - let agent handle that)
@@ -1038,16 +1036,17 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         array $arguments,
         array $tools,
         ?int $project_id,
-        string $model = 'o3-mini'
+        string $model = 'o3-mini',
+        ?string $username = null
     ): array {
         // Built-in: spawnAgent (before pipeline lookup)
         if ($tool_name === 'spawnAgent') {
-            return $this->handleSpawnAgentCall($arguments, $project_id, $model);
+            return $this->handleSpawnAgentCall($arguments, $project_id, $model, $username);
         }
 
         // Build tool use + context
         $toolUse = new ToolUse($tool_name, $arguments);
-        $context = new ToolContext($project_id);
+        $context = new ToolContext($project_id, $username);
         $context->set('secure_chat_ai_instance', $this);
         $context->set('guzzle_client', $this->guzzleClient);
 
@@ -1193,7 +1192,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     /**
      * Handle the built-in spawnAgent tool call.
      */
-    private function handleSpawnAgentCall(array $arguments, ?int $project_id, string $model): array
+    private function handleSpawnAgentCall(array $arguments, ?int $project_id, string $model, ?string $username = null): array
     {
         $prompt = $arguments['prompt'] ?? '';
         if (empty($prompt)) {
@@ -1211,6 +1210,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             prompt: $prompt,
             model: $model,
             projectId: $project_id,
+            username: $username,
             depth: 1,
             maxDepth: $maxDepth,
             allowedTools: $allowedTools
@@ -1227,8 +1227,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         string $prompt,
         string $model,
         ?int $projectId,
-        int $depth,
-        int $maxDepth,
+        ?string $username = null,
+        int $depth = 1,
+        int $maxDepth = 1,
         array $allowedTools = []
     ): array
     {
@@ -1272,6 +1273,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             model: $model,
             params: $params,
             project_id: $projectId,
+            username: $username,
             depth: $depth,
             maxDepth: $maxDepth
         );
