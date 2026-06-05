@@ -20,6 +20,7 @@ require_once "classes/ToolContext.php";
 require_once "classes/AbortController.php";
 require_once "classes/HookInterface.php";
 require_once "classes/HookResult.php";
+require_once "classes/ProjectAccessPreHook.php";
 require_once "classes/JsonConfigToolAdapter.php";
 require_once "classes/ToolPipeline.php";
 
@@ -1116,11 +1117,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      */
     private function loadPreToolUseHooks(?int $projectId = null): array
     {
+        // ProjectAccessPreHook is always-on — core governance, not configurable
+        $builtin = [new ProjectAccessPreHook()];
         $system  = $this->loadHooksFromSetting('pre_tool_use_hooks', PreToolUseHook::class, null);
         $project = $projectId
             ? $this->loadHooksFromSetting('project_pre_tool_use_hooks', PreToolUseHook::class, $projectId)
             : [];
-        return array_merge($system, $project);
+        return array_merge($builtin, $system, $project);
     }
 
     /**
