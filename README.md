@@ -79,6 +79,27 @@ This separation ensures:
 
 ---
 
+## Recent Improvements
+
+### 2026-06-10: User Identity Governance + Additive Tool Discovery
+
+**Username propagation through agent pipeline:**
+- `callAI($model, $params, $project_id, $username)` — `$username` now flows through `runAgentLoop` → `executeToolCall` → `ToolContext`
+- All tool calls carry the REDCap username of the requesting user
+
+**`ProjectAccessPreHook` (always-on):**
+- Built-in `PreToolUseHook` prepended before all other hooks — cannot be bypassed
+- When a tool call includes a `pid` parameter, checks `redcap_user_rights` to confirm the requesting user has access to that project
+- Denies with: `"Access denied: '{username}' does not have rights to project {pid}."`
+- Allows freely if: no `pid` in input, `pid` matches the session's own project, or `$username` is null (system/cron context)
+
+**Additive tool discovery (system UNION project):**
+- `agent_tool_em_prefixes` (system setting) = tools everyone gets
+- `project_agent_tool_em_prefixes` (project setting) = additional tools for this project
+- Both are merged (union, deduplicated) — system tools are never replaced by project config
+
+---
+
 ## Supported Model Categories
 
 ### Chat / Completion Models
