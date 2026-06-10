@@ -68,7 +68,7 @@ class ToolPipeline
         foreach ($this->preHooks as $hook) {
             $result = $hook->handle($use, $context);
             if ($result->decision === 'deny') {
-                return ToolResult::fail($result->message ?? 'Tool execution denied by hook');
+                return ToolResult::fail('denied by hook: ' . ($result->message ?? 'Tool execution denied.'));
             }
         }
 
