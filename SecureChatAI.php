@@ -1050,6 +1050,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $context = new ToolContext($project_id, $username);
         $context->set('secure_chat_ai_instance', $this);
         $context->set('guzzle_client', $this->guzzleClient);
+        $context->set('model', $model);
 
         // Phase 1: Lookup tool config from JSON registry
         $toolConfig = null;
