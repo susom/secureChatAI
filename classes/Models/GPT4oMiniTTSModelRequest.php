@@ -23,11 +23,13 @@ class GPT4oMiniTTSModelRequest extends BaseModelRequest
             "Content-Type: application/json",
         ];
 
-        // Log outgoing payload
+        // Log outgoing request metadata only — never the payload/input text (may be PHI).
         if (method_exists($this->module, 'emDebug')) {
             $this->module->emDebug('TTS REQUEST', [
-                'url' => $apiEndpoint,
-                'payload' => $payload,
+                'url'          => $apiEndpoint,
+                'model'        => $data['model'],
+                'voice'        => $data['voice'],
+                'input_length' => isset($data['input']) ? strlen((string) $data['input']) : 0,
             ]);
         }
 
@@ -68,16 +70,14 @@ class GPT4oMiniTTSModelRequest extends BaseModelRequest
 
         $elapsed = microtime(true) - $startTime;
 
-        // Log raw response info
+        // Log response metadata only — never the response body (may echo input/PHI).
         if (method_exists($this->module, 'emDebug')) {
             $this->module->emDebug('TTS RESPONSE', [
-                'http_code' => $httpCode,
+                'http_code'    => $httpCode,
                 'content_type' => $contentType,
-                'elapsed_sec' => round($elapsed, 3),
-                'body_length' => strlen($body),
-                'curl_error' => $curlErr,
-                // Only log a snippet of the body for debugging
-                'body_snippet' => substr($body, 0, 200)
+                'elapsed_sec'  => round($elapsed, 3),
+                'body_length'  => strlen($body),
+                'curl_error'   => $curlErr,
             ]);
         }
 
