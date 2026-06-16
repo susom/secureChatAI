@@ -83,11 +83,18 @@ abstract class BaseModelRequest implements ModelInterface {
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
         if (curl_errno($ch)) {
-            throw new \Exception('cURL error: ' . curl_error($ch));
+            $curlError = curl_error($ch);
+            curl_close($ch);
+            throw new \Exception('cURL error: ' . $curlError);
         }
 
         if ($http_code < 200 || $http_code >= 300) {
-            throw new Exception('HTTP error: ' . $http_code . ' - Response: ' . $response);
+            // PHI-safe: do not embed the raw response body in the exception message — it can
+            // echo prompt/response content (PHI) into upstream debug logs (see callAI catch).
+            $responseLength = strlen((string) $response);
+            curl_close($ch);
+            throw new Exception('HTTP error: ' . $http_code
+                . ' (response body omitted; length=' . $responseLength . ' bytes)');
         }
 
         curl_close($ch);
