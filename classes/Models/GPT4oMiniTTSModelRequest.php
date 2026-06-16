@@ -31,6 +31,7 @@ class GPT4oMiniTTSModelRequest extends BaseModelRequest
                 'model'        => $data['model'],
                 'voice'        => $data['voice'],
                 'input_length' => isset($data['input']) ? strlen((string) $data['input']) : 0,
+            ]);
         }
 
         $ch = curl_init($apiEndpoint);
