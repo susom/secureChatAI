@@ -830,10 +830,10 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         while ($step < $max_steps) {
             $step++;
 
-            // Step-by-step logging
+            // Step-by-step logging (PHI-safe: log only metadata, not message content)
             $this->emDebug("AGENT STEP {$step}/{$max_steps}", [
                 'messages_count' => count($messages),
-                'last_message_preview' => substr(end($messages)['content'] ?? '', 0, 100)
+                'last_message_length' => strlen(end($messages)['content'] ?? '')
             ]);
 
             $response = $this->callLLMOnce($model, $params, $project_id);
