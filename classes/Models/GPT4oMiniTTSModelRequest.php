@@ -26,11 +26,11 @@ class GPT4oMiniTTSModelRequest extends BaseModelRequest
         // Log outgoing request metadata only — never the payload/input text (may be PHI).
         if (method_exists($this->module, 'emDebug')) {
             $this->module->emDebug('TTS REQUEST', [
-                'url'          => $apiEndpoint,
+                'url_host'     => parse_url($apiEndpoint, PHP_URL_HOST),
+                'url_path'     => parse_url($apiEndpoint, PHP_URL_PATH),
                 'model'        => $data['model'],
                 'voice'        => $data['voice'],
                 'input_length' => isset($data['input']) ? strlen((string) $data['input']) : 0,
-            ]);
         }
 
         $ch = curl_init($apiEndpoint);
