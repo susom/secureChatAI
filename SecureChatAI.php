@@ -383,8 +383,15 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
             } catch (\Exception $e) {
                 $attempt++;
-                $this->emDebug("Attempt $attempt: Error", $e->getMessage());
-                $this->emDebug("Model: $model", "$params : $params");
+                // PHI-safe: log the error description and request metadata only.
+                // Never log $params directly — it holds the prompt messages (PHI).
+                $this->emDebug("Attempt $attempt failed", [
+                    'model'         => $model,
+                    'error'         => $e->getMessage(),
+                    'message_count' => isset($params['messages']) && is_array($params['messages'])
+                        ? count($params['messages'])
+                        : 0,
+                ]);
 
                 if ($attempt > $retries) {
                     $error = [
@@ -830,7 +837,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             ]);
 
             $response = $this->callLLMOnce($model, $params, $project_id);
-            $this->emDebug("AGENT RAW RESPONSE", $response);
+            // PHI-safe: log only response metadata (token usage, model, shape) — never the
+            // raw content body, which can contain prompt/response PHI.
+            $this->emDebug("AGENT RAW RESPONSE (metadata only)", $this->summarizeResponseForDebug($response));
 
             $content = trim($response['content'] ?? '');
 
@@ -1020,7 +1029,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             $filteredParams = $this->filterDefaultParamsForModel($model, $params);
             $generic = new GenericModelRequest($this, $modelConfig, [], $model);
             $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
-            $this->emDebug("RAW GenericModelRequest API RESPONSE", $responseData);
+            // PHI-safe: log only response metadata (token usage, model, shape) — never the
+            // raw API response body, which can contain response PHI.
+            $this->emDebug("RAW GenericModelRequest API RESPONSE (metadata only)", $this->summarizeResponseForDebug($responseData));
         }
 
         $normalizedResponse = $this->normalizeResponse($responseData, $model);
@@ -1806,8 +1817,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $final = min($available, $spec['output_max']);
         $final = max(1024, $final);  // Min fallback
 
-        // Log equivalent (adapt to your logger)
-        error_log("\n\nfinal_max_tokens = $final\n\n");
+        // Metadata only (computed token ceiling) — no prompt/response content. Routed
+        // through emDebug so it respects debug-mode gating instead of always-on error_log.
+        $this->emDebug("computeDynamicMaxTokens", [
+            'model'         => $model,
+            'prompt_tokens' => $promptTokens,
+            'final_max'     => $final,
+        ]);
 
         return [$spec['param'], $final, $promptTokens];
     }
@@ -1854,6 +1870,47 @@ private function toOpenAIToolsShape(array $tools): array
 }
 // OPTIONAL FOR LATER , MODEL SPECIFIC STUFF
 
+
+    /**
+     * Build a PHI-safe metadata summary of an LLM request/response for debug logging.
+     *
+     * Prompt and response BODIES may contain PHI, so they must never be written to the
+     * debug logs. This helper extracts only non-content metadata (token usage, model,
+     * role, finish reason, structural shape and content length) that is safe to log.
+     *
+     * @param mixed $response Raw or normalized response from an LLM adapter.
+     * @return array Safe-to-log metadata describing the response (no content body).
+     */
+    private function summarizeResponseForDebug($response): array
+    {
+        // Non-array payloads carry no structured content to redact; report the type only.
+        if (!is_array($response)) {
+            return ['type' => gettype($response)];
+        }
+
+        // Resolve the message content from either the normalized shape ('content')
+        // or the raw OpenAI-compatible shape ('choices[0].message.content') WITHOUT
+        // ever including the text itself in the returned metadata.
+        $content = $response['content']
+            ?? ($response['choices'][0]['message']['content'] ?? null);
+
+        return [
+            // Key names only (e.g. "content", "usage") — never their values.
+            'top_level_keys' => array_keys($response),
+            'model'          => $response['model'] ?? null,
+            'role'           => $response['role']
+                ?? ($response['choices'][0]['message']['role'] ?? null),
+            'finish_reason'  => $response['choices'][0]['finish_reason'] ?? null,
+            // Token counts are metadata, not content — safe to log.
+            'usage'          => $response['usage'] ?? null,
+            'choices_count'  => isset($response['choices']) && is_array($response['choices'])
+                ? count($response['choices'])
+                : null,
+            // Length and shape signals only — never the text itself.
+            'content_length' => is_string($content) ? strlen($content) : null,
+            'has_tool_call'  => is_string($content) && str_contains($content, 'tool_call'),
+        ];
+    }
 
     private function normalizeResponse($response, $model)
     {
@@ -1924,7 +1981,7 @@ private function toOpenAIToolsShape(array $tools): array
                 return ($msg['role'] ?? '') === 'user';
             });
             $lastUserMessage = !empty($userMessages) ? array_values($userMessages)[count($userMessages) - 1] : null;
-            
+
             if ($lastUserMessage) {
                 $atomicPayload['user_message'] = $lastUserMessage['content'] ?? '';
             }
@@ -1985,7 +2042,7 @@ private function toOpenAIToolsShape(array $tools): array
                 return ($msg['role'] ?? '') === 'user';
             });
             $lastUserMessage = !empty($userMessages) ? array_values($userMessages)[count($userMessages) - 1] : null;
-            
+
             if ($lastUserMessage) {
                 $atomicPayload['user_message'] = $lastUserMessage['content'] ?? '';
             }
