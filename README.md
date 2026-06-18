@@ -322,6 +322,8 @@ project_post_tool_use_hooks = Stanford\EMOne\TimingHook, Stanford\EMTwo\LoggingH
 
 Registration is opt-in per project. An EM being enabled doesn't auto-register its hooks — you explicitly choose which hooks are active in settings. Remove a class name to disable it without touching code.
 
+**Disabling the PHI field hook per project:** The `PhiFieldPreHook` (shipped by the Record Tools EM) is registered system-wide and is **ON by default** for every project. Because all currently approved models accept PHI, a project may opt out by checking **Disable PHI Field Protection Hook** in that project's SecureChatAI settings (`disable_phi_field_hook`). When checked, SecureChatAI filters that hook out of the pre-hook chain for that project only — all other hooks (including the always-on `ProjectAccessPreHook`) still run.
+
 #### Step 3: Make Sure Your Class Is Autoloadable
 
 SecureChatAI instantiates hooks via `new $className()`. The class must be loadable at that point. REDCap's EM framework autoloads the main module class but **not** classes in subdirectories.

@@ -350,6 +350,12 @@
             "required": false
         },
         {
+            "key": "disable_phi_field_hook",
+            "name": "<b>Disable PHI Field Protection Hook</b><br><i>(optional)</i> The <code>PhiFieldPreHook</code> is <b>ON by default</b> when registered system-wide. Check this box to <b>disable</b> it for this project, allowing record tools to access/write identifier (PHI) fields with non-Gemini models.",
+            "type": "checkbox",
+            "required": false
+        },
+        {
             "key": "enable-project-usage",
             "name": "<b>Enable Project Usage Dashboard</b><br><i>Shows AI usage analytics for this project</i>",
             "type": "checkbox",
