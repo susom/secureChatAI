@@ -1135,7 +1135,28 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $project = $projectId
             ? $this->loadHooksFromSetting('project_pre_tool_use_hooks', PreToolUseHook::class, $projectId)
             : [];
-        return array_merge($builtin, $system, $project);
+        $hooks = array_merge($builtin, $system, $project);
+
+        // Project-level opt-out: the PHI field protection hook is ON by default,
+        // but a project may disable it (all current models accept PHI).
+        if ($projectId && $this->getProjectSetting('disable_phi_field_hook', $projectId)) {
+            $hooks = array_values(array_filter($hooks, fn($hook) => !$this->isPhiFieldHook($hook)));
+            $this->emDebug("PHI field pre-hook disabled via project setting for project {$projectId}");
+        }
+
+        return $hooks;
+    }
+
+    /**
+     * True if the given hook instance is the PHI field protection hook
+     * (matched by class basename so it works regardless of installed EM version).
+     */
+    private function isPhiFieldHook($hook): bool
+    {
+        $class = get_class($hook);
+        $needle = '\\PhiFieldPreHook';
+        return $class === 'Stanford\\REDCapAgentRecordTools\\PhiFieldPreHook'
+            || substr($class, -strlen($needle)) === $needle;
     }
 
     /**
