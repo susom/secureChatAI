@@ -907,12 +907,30 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     $max_tool_result_chars
                 );
 
-                // Track tool usage for UI display
-                $tools_used[] = [
+                // Track tool usage for UI display. For records.search results
+                // that carry a cache reference, also pass paging metadata
+                // through so the chat UI can render its own pagination
+                // controls against the server-side cache — the LLM shouldn't
+                // burn turns clicking "next page".
+                $usageEntry = [
                     'name' => $tool_name,
                     'arguments' => $arguments,
                     'step' => $step
                 ];
+                if ($tool_name === 'records.search' && is_array($execution['result'])) {
+                    $r = $execution['result'];
+                    if (!empty($r['reference']) && isset($r['total_record_count'])) {
+                        $usageEntry['paging'] = [
+                            'reference' => $r['reference'],
+                            'total' => (int)$r['total_record_count'],
+                            'offset' => (int)($r['offset'] ?? 0),
+                            'limit' => (int)($r['limit'] ?? 20),
+                            'truncated' => !empty($r['truncated']),
+                            'preview_markdown' => $r['preview_markdown'] ?? '',
+                        ];
+                    }
+                }
+                $tools_used[] = $usageEntry;
 
                 // Detect tool ping-pong loops (same tool+args called repeatedly)
                 $callSignature = $tool_name . ':' . json_encode($arguments);
