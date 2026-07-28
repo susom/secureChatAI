@@ -30,6 +30,11 @@
 ### In progress
 - Nothing active
 
+### Cappy data-tool integration (2026-07, with REDCapAgentRecordTools + redcap-em-chatbot)
+- `SecureChatAI.php:915-933` copies `reference/total/offset/limit/preview_markdown` from `records.search` tool results into `tools_used[].paging` — the only conduit from tool results to a frontend (e.g. Cappy's `PaginatedTable`). Keep in sync if the tools module changes response keys.
+- **8000-char tool-result cap** (`SecureChatAI.php:1343`) drops **trailing** keys — tool EMs must order `preview_markdown`/`note`/`message` before any large `records` payload, and large raw payloads should be opt-in (`include_records`).
+- Tool EMs must never echo `ref_xxx` session-cache handles to end users.
+
 ### Known issues
 - grok-3: "Model service is unavailable" on AI Hub side (not code issue)
 - Gemini access may require explicit subscription activation per product tier
