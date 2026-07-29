@@ -752,11 +752,29 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $messages = $params['messages'] ?? [];
         $tools = $this->loadToolsForProject($project_id);
 
-        // Force schema-capable model for agent mode
+        // Force schema-capable model for agent mode. Pick the fallback
+        // dynamically from the *configured* schema-capable models so we never
+        // silently switch to an alias that isn't in $this->modelConfig (which
+        // would throw "Unsupported model" mid-loop and surface as a generic
+        // "network difficulties" error to the user).
         $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'o1', 'o3', 'o3-mini', 'o4-mini'];
         if (!in_array($model, $schemaModels)) {
-            $this->emDebug("Agent mode requires schema-capable model, switching from {$model} to o3-mini");
-            $model = 'o3-mini'; // Default fallback for agent mode
+            $configured = array_keys($this->modelConfig);
+            $fallback = null;
+            foreach ($schemaModels as $candidate) {
+                if (in_array($candidate, $configured, true)) {
+                    $fallback = $candidate;
+                    break;
+                }
+            }
+            if ($fallback === null) {
+                throw new \Exception(
+                    "Agent mode requires a schema-capable model but none of [" . implode(', ', $schemaModels)
+                    . "] are configured in SecureChatAI's api-settings. Add one, or disable agent mode for this project."
+                );
+            }
+            $this->emDebug("Agent mode requires schema-capable model, switching from {$model} to {$fallback}");
+            $model = $fallback;
         }
 
         $this->emDebug("AGENT MODE ENABLED", [
