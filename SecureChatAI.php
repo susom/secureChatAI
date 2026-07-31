@@ -2004,7 +2004,19 @@ private function toOpenAIToolsShape(array $tools): array
             $decoded = json_decode($normalized['content'], true);
             if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                 $normalized['structured_output'] = $decoded;
-                $normalized['preserve_structure'] = true;
+                // Only mark preserve_structure when the JSON looks like a genuine
+                // tool-call / structured-output payload, NOT when it's an agent-mode
+                // response envelope ({final_answer|tool_call|thinking}). The agent
+                // schema is consumed by runAgentLoop before sanitizeOutputForUI,
+                // so by the time we get here it must already be unwrapped — any
+                // remaining JSON is either an unwrapped envelope (bug) or
+                // legitimate structured output. Inspect the shape.
+                $isAgentEnvelope = isset($decoded['final_answer'])
+                    || isset($decoded['tool_call'])
+                    || isset($decoded['thinking']);
+                if (!$isAgentEnvelope) {
+                    $normalized['preserve_structure'] = true;
+                }
             }
             $normalized['role'] = $response['choices'][0]['message']['role'] ?? 'assistant';
             $normalized['model'] = $response['model'] ?? $model;
