@@ -180,22 +180,36 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $turnResult = $this->query($turnSql, [$session_id, $prefix]);
         $turnLogs = [];
         $firstTurnLogId = null;
+        $dbgRaw = 0; $dbgPidDropped = 0; $dbgUserDropped = 0; // PHI-safe counters
         while ($row = $turnResult->fetch_assoc()) {
+            $dbgRaw++;
             $decoded = json_decode($row['message'], true);
             if ($decoded === null) continue;
-            if (intval($decoded['project_id'] ?? 0) !== $pid) continue;
+            if (intval($decoded['project_id'] ?? 0) !== $pid) { $dbgPidDropped++; continue; }
             // Authorization: session ids are client-generated and guessable, so
             // scope to the requesting user. Turn rows carry the username that
             // created them; when a user is supplied, only that user's turns are
             // returned. Prevents rebuilding another user's chat (possible PHI)
             // from a guessed session_id within the same project.
-            if ($username !== null && (string)($decoded['username'] ?? '') !== (string)$username) continue;
+            if ($username !== null && (string)($decoded['username'] ?? '') !== (string)$username) { $dbgUserDropped++; continue; }
             $decoded['timestamp'] = $row['timestamp'];
             $decoded['id'] = $row['log_id'];
             $decoded['record'] = $row['record'];
             if ($firstTurnLogId === null) $firstTurnLogId = (int)$row['log_id'];
             $turnLogs[] = $decoded;
         }
+
+        // TEMP DIAGNOSTIC (PHI-safe: counts + ids only, never message content).
+        // Remove once the rehydration-miss is pinpointed.
+        $this->emDebug("rehydrateProjectSession", [
+            'pid'                => $pid,
+            'req_username'       => $username,        // REDCap login, not PHI
+            'session_id'         => $session_id,      // client ms-timestamp, not PHI
+            'turn_rows_raw'      => $dbgRaw,          // rows matched by session_id in SQL
+            'dropped_pid'        => $dbgPidDropped,
+            'dropped_username'   => $dbgUserDropped,
+            'turn_rows_kept'     => count($turnLogs),
+        ]);
 
         if (!empty($turnLogs)) {
             $session = $this->buildSessionFromTurns($session_id, $pid, $turnLogs);
