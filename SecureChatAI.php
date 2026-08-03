@@ -2240,9 +2240,11 @@ private function toOpenAIToolsShape(array $tools): array
     private function logConversationTurn($project_id, $requestData, $responseData, $username = null)
     {
         if (empty($requestData['session_id'])) {
+            $this->emDebug("logConversationTurn SKIP", ['pid' => $project_id, 'reason' => 'no_session_id']);
             return;
         }
         if (array_key_exists('log_turn', $requestData) && $requestData['log_turn'] === false) {
+            $this->emDebug("logConversationTurn SKIP", ['pid' => $project_id, 'session_id' => $requestData['session_id'], 'reason' => 'log_turn_false']);
             return;
         }
 
@@ -2268,8 +2270,22 @@ private function toOpenAIToolsShape(array $tools): array
         // answer (e.g. an embedding/structured response that happens to carry a
         // session_id) is junk that rehydrates to a blank bubble.
         if (trim((string)$userMessage) === '' && trim((string)$assistant) === '') {
+            $this->emDebug("logConversationTurn SKIP", ['pid' => $project_id, 'session_id' => $requestData['session_id'], 'reason' => 'empty_turn']);
             return;
         }
+
+        // TEMP DIAGNOSTIC (PHI-safe: counts/ids/flags only, never content).
+        // Confirms which session_id a turn is written under, to compare against
+        // what rehydrate later queries. Remove once the write/read id mismatch
+        // is pinpointed.
+        $this->emDebug("logConversationTurn WRITE", [
+            'pid'           => $project_id,
+            'session_id'    => $requestData['session_id'],
+            'username'      => $username,
+            'has_user'      => trim((string)$userMessage) !== '',
+            'has_assistant' => trim((string)$assistant) !== '',
+            'is_error'      => $isError,
+        ]);
 
         $atomicPayload = [
             'project_id'         => $project_id,
