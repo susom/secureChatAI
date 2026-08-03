@@ -156,12 +156,99 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      * @param int $project_id
      * @return array Session object with 'messages', 'metadata', 'stats'
      */
-    public function rehydrateProjectSession($session_id, $project_id)
+    public function rehydrateProjectSession($session_id, $project_id, $username = null)
     {
         $pid = intval($project_id);
         $prefix = $this->PREFIX;
 
-        // Find all logs for this session via the promoted session_id parameter
+        // --- Preferred path: dedicated one-row-per-turn records ---
+        // CappyChatTurn / CappyChatTurnError rows (written by logConversationTurn)
+        // are already clean user-prompt + final-answer pairs, so rebuilding from
+        // them is deterministic. Deriving turns from the per-LLM-call audit log
+        // is lossy in agent mode (N rows/turn, injected TOOL RESULT messages and
+        // tool-call-only envelopes leak in, errored turns vanish).
+        $turnSql = "SELECT l.log_id, l.timestamp, l.record, l.message
+                    FROM redcap_external_modules_log l
+                    JOIN redcap_external_modules_log_parameters p
+                        ON l.log_id = p.log_id AND p.name = 'session_id' AND p.value = ?
+                    WHERE l.external_module_id = (
+                        SELECT external_module_id FROM redcap_external_modules
+                        WHERE directory_prefix = ? LIMIT 1
+                    )
+                    AND l.record IN ('CappyChatTurn', 'CappyChatTurnError')
+                    ORDER BY l.log_id ASC";
+        $turnResult = $this->query($turnSql, [$session_id, $prefix]);
+        $turnLogs = [];
+        $firstTurnLogId = null;
+        while ($row = $turnResult->fetch_assoc()) {
+            $decoded = json_decode($row['message'], true);
+            if ($decoded === null) continue;
+            if (intval($decoded['project_id'] ?? 0) !== $pid) continue;
+            // Authorization: session ids are client-generated and guessable, so
+            // scope to the requesting user. Turn rows carry the username that
+            // created them; when a user is supplied, only that user's turns are
+            // returned. Prevents rebuilding another user's chat (possible PHI)
+            // from a guessed session_id within the same project.
+            if ($username !== null && (string)($decoded['username'] ?? '') !== (string)$username) continue;
+            $decoded['timestamp'] = $row['timestamp'];
+            $decoded['id'] = $row['log_id'];
+            $decoded['record'] = $row['record'];
+            if ($firstTurnLogId === null) $firstTurnLogId = (int)$row['log_id'];
+            $turnLogs[] = $decoded;
+        }
+
+        if (!empty($turnLogs)) {
+            $session = $this->buildSessionFromTurns($session_id, $pid, $turnLogs);
+
+            // Sessions active across the turn-logging deploy have their earlier
+            // turns only as legacy audit rows. Merge those (rows before the first
+            // turn row) so cross-deploy history isn't lost. Only when the request
+            // is NOT user-scoped: legacy rows carry no username, so ownership is
+            // unverifiable and they must not be exposed on a user-scoped request.
+            if ($username === null && $firstTurnLogId !== null) {
+                $legacy = $this->legacyReconstructSession($session_id, $pid, $prefix, $firstTurnLogId);
+                if (!empty($legacy['messages'])) {
+                    $session['messages'] = array_merge($legacy['messages'], $session['messages']);
+                    $session['stats']['total_turns'] += ($legacy['stats']['total_turns'] ?? 0);
+                    $session['stats']['total_tokens'] += ($legacy['stats']['total_tokens'] ?? 0);
+                    $session['stats']['models_used'] = array_values(array_unique(array_merge(
+                        $legacy['stats']['models_used'] ?? [],
+                        $session['stats']['models_used'] ?? []
+                    )));
+                    if (!empty($legacy['metadata']['start_time'])) {
+                        $session['metadata']['start_time'] = $legacy['metadata']['start_time'];
+                    }
+                }
+            }
+            return $session;
+        }
+
+        // No turn rows. A user-scoped request cannot be satisfied from legacy
+        // audit rows — they carry no username, so ownership is unverifiable.
+        // Deny rather than risk exposing another user's pre-deploy history.
+        if ($username !== null) {
+            return [
+                'session_id' => $session_id,
+                'messages' => [],
+                'metadata' => [],
+                'stats' => ['total_turns' => 0, 'total_tokens' => 0, 'models_used' => []]
+            ];
+        }
+
+        // Unscoped fallback: reconstruct from the per-LLM-call audit log.
+        return $this->legacyReconstructSession($session_id, $pid, $prefix);
+    }
+
+    /**
+     * Legacy rehydration from the per-LLM-call audit log (SecureChatLog rows).
+     * Used for sessions that predate turn logging, and to backfill the pre-turn
+     * portion of sessions that straddle the deploy. $maxLogIdExclusive, when
+     * given, limits the scan to rows strictly before that log_id.
+     */
+    private function legacyReconstructSession($session_id, $pid, $prefix, $maxLogIdExclusive = null)
+    {
+        $bound = $maxLogIdExclusive !== null ? " AND l.log_id < ?" : "";
+
         $sql = "SELECT l.log_id, l.timestamp, l.record, l.message
                 FROM redcap_external_modules_log l
                 JOIN redcap_external_modules_log_parameters p
@@ -170,9 +257,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     SELECT external_module_id FROM redcap_external_modules
                     WHERE directory_prefix = ? LIMIT 1
                 )
-                AND l.record IN ('SecureChatLog', 'SecureChatLogError')
+                AND l.record IN ('SecureChatLog', 'SecureChatLogError')$bound
                 ORDER BY l.log_id ASC";
-        $result = $this->query($sql, [$session_id, $prefix]);
+        $params = $maxLogIdExclusive !== null
+            ? [$session_id, $prefix, $maxLogIdExclusive]
+            : [$session_id, $prefix];
+        $result = $this->query($sql, $params);
 
         $logs = [];
         while ($row = $result->fetch_assoc()) {
@@ -187,6 +277,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         // Fallback: scan JSON message for pre-promotion logs
         if (empty($logs)) {
+            $bound2 = $maxLogIdExclusive !== null ? " AND log_id < ?" : "";
             $sql2 = "SELECT log_id, timestamp, record, message
                      FROM redcap_external_modules_log
                      WHERE external_module_id = (
@@ -194,11 +285,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                          WHERE directory_prefix = ? LIMIT 1
                      )
                      AND record IN ('SecureChatLog', 'SecureChatLogError')
-                     AND message LIKE ?
+                     AND message LIKE ?$bound2
                      ORDER BY log_id ASC
                      LIMIT 1000";
             $pattern = '%"session_id":"' . preg_replace('/[^a-zA-Z0-9_-]/', '', $session_id) . '"%';
-            $result2 = $this->query($sql2, [$prefix, $pattern]);
+            $params2 = $maxLogIdExclusive !== null
+                ? [$prefix, $pattern, $maxLogIdExclusive]
+                : [$prefix, $pattern];
+            $result2 = $this->query($sql2, $params2);
             while ($row = $result2->fetch_assoc()) {
                 $decoded = json_decode($row['message'], true);
                 if ($decoded === null) continue;
@@ -220,7 +314,6 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             ];
         }
 
-        // Build conversation from logs (same logic as SecureChatLog::rehydrateSession)
         $messages = [];
         $models = [];
         $total_tokens = 0;
@@ -276,7 +369,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             $embedParams = array_merge([
                 'model' => $this->modelConfig[$model]['model_id'] ?? $model
             ], $params);
-            unset($embedParams['session_id'], $embedParams['agent_mode'], $embedParams['project_id']);
+            unset($embedParams['session_id'], $embedParams['agent_mode'], $embedParams['project_id'], $embedParams['log_turn']);
             return $embedParams;
         }
 
@@ -316,7 +409,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         unset($merged['max_tokens']);
 
         // Strip internal/meta params that are not part of the API contract
-        unset($merged['session_id'], $merged['agent_mode'], $merged['project_id']);
+        unset($merged['session_id'], $merged['agent_mode'], $merged['project_id'], $merged['log_turn']);
 
         return $merged;
     }
@@ -379,6 +472,21 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     'total_duration_ms' => round((microtime(true) - $startTotal) * 1000, 2)
                 ]);
 
+                // One clean turn record for reliable rehydration. Log the
+                // sanitized content (what the user actually saw), but carry over
+                // tools_used/usage from the pre-sanitize response.
+                $turnResponse = is_array($sanitizedResponse) ? $sanitizedResponse : ['content' => (string)$sanitizedResponse];
+                if (empty($turnResponse['tools_used']) && !empty($response['tools_used'])) {
+                    $turnResponse['tools_used'] = $response['tools_used'];
+                }
+                if (empty($turnResponse['usage']) && !empty($response['usage'])) {
+                    $turnResponse['usage'] = $response['usage'];
+                }
+                if (!empty($response['error'])) {
+                    $turnResponse['error'] = true;
+                }
+                $this->logConversationTurn($project_id, $params, $turnResponse, $username);
+
                 return $sanitizedResponse;
 
             } catch (\Exception $e) {
@@ -410,7 +518,18 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     ]);
 
                     // ✅ Sanitize errors too
-                    return $this->sanitizeOutputForUI($error);
+                    $sanitizedError = $this->sanitizeOutputForUI($error);
+
+                    // Turn record so the user's question survives rehydration
+                    // even when the request failed outright (no answer produced).
+                    $turnError = is_array($sanitizedError) ? $sanitizedError : ['content' => (string)$sanitizedError];
+                    $turnError['error'] = true;
+                    if (empty($turnError['model'])) {
+                        $turnError['model'] = $model;
+                    }
+                    $this->logConversationTurn($project_id, $params, $turnError, $username);
+
+                    return $sanitizedError;
                 }
             }
         }
@@ -2033,6 +2152,145 @@ private function toOpenAIToolsShape(array $tools): array
         return $normalized;
     }
 
+    /**
+     * Build a rehydrated session from dedicated one-row-per-turn records.
+     * Each row already holds the real user prompt and final assistant answer,
+     * so this is a straight map — no filtering of agent-loop bookkeeping, and
+     * errored turns keep their user prompt (they are NOT skipped).
+     */
+    private function buildSessionFromTurns($session_id, $pid, array $turnLogs)
+    {
+        $messages = [];
+        $models = [];
+        $total_tokens = 0;
+        $first_timestamp = null;
+        $last_timestamp = null;
+
+        foreach ($turnLogs as $index => $log) {
+            if (!empty($log['user_message'])) {
+                $messages[] = [
+                    'role' => 'user',
+                    'content' => $log['user_message'],
+                    'turn' => $index + 1,
+                ];
+            }
+            if (!empty($log['assistant_response'])) {
+                $messages[] = [
+                    'role' => 'assistant',
+                    'content' => $log['assistant_response'],
+                    'turn' => $index + 1,
+                    'tools_used' => $log['tools_used'] ?? null,
+                ];
+            }
+            if (!empty($log['model'])) $models[$log['model']] = true;
+            if (!empty($log['usage']['total_tokens'])) $total_tokens += $log['usage']['total_tokens'];
+            if ($first_timestamp === null) $first_timestamp = $log['timestamp'];
+            $last_timestamp = $log['timestamp'];
+        }
+
+        return [
+            'session_id' => $session_id,
+            'messages' => $messages,
+            'metadata' => [
+                'project_id' => $pid,
+                'start_time' => $first_timestamp,
+                'end_time' => $last_timestamp,
+                'duration_seconds' => $first_timestamp && $last_timestamp ?
+                    strtotime($last_timestamp) - strtotime($first_timestamp) : 0
+            ],
+            'stats' => [
+                'total_turns' => count($turnLogs),
+                'total_tokens' => $total_tokens,
+                'models_used' => array_keys($models)
+            ]
+        ];
+    }
+
+    /**
+     * Log ONE conversation turn (real user prompt + final assistant answer) as
+     * a dedicated record, distinct from the per-LLM-call audit rows written by
+     * logInteraction(). rehydrateProjectSession reads THESE rows first to
+     * rebuild chat history reliably.
+     *
+     * Two-store design (intentional, not redundant to remove): logInteraction()
+     * still writes its per-LLM-call rows — those remain the AUDIT trail (every
+     * model call, consumed by getSecureChatLogsBySession and admin tooling).
+     * CappyChatTurn rows are the REHYDRATION source (one clean row per turn).
+     * They overlap in content but serve different consumers; do not drop the
+     * per-call rows on the assumption turn rows supersede them.
+     *
+     * Skipped when there is no session_id, or when the caller opts out via
+     * $requestData['log_turn'] === false (e.g. the client-side compaction
+     * summary call, which reuses the session id but is not a real user turn).
+     */
+    private function logConversationTurn($project_id, $requestData, $responseData, $username = null)
+    {
+        if (empty($requestData['session_id'])) {
+            return;
+        }
+        if (array_key_exists('log_turn', $requestData) && $requestData['log_turn'] === false) {
+            return;
+        }
+
+        // Real user prompt = last user message in the INCOMING messages. The
+        // agent loop's injected TOOL RESULT messages live on a local copy inside
+        // runAgentLoop, so $requestData['messages'] here is still the clean UI
+        // context.
+        $userMessage = '';
+        if (!empty($requestData['messages']) && is_array($requestData['messages'])) {
+            foreach (array_reverse($requestData['messages']) as $msg) {
+                if (($msg['role'] ?? '') === 'user') {
+                    $userMessage = (string)($msg['content'] ?? '');
+                    break;
+                }
+            }
+        }
+
+        $isError = !empty($responseData['error']);
+        $assistant = $responseData['content']
+            ?? ($responseData['choices'][0]['message']['content'] ?? '');
+
+        // Skip empty turns — a row with neither a user prompt nor an assistant
+        // answer (e.g. an embedding/structured response that happens to carry a
+        // session_id) is junk that rehydrates to a blank bubble.
+        if (trim((string)$userMessage) === '' && trim((string)$assistant) === '') {
+            return;
+        }
+
+        $atomicPayload = [
+            'project_id'         => $project_id,
+            'session_id'         => $requestData['session_id'],
+            // Owner of the turn. rehydrateProjectSession filters by this so one
+            // user can't rebuild another user's chat from a guessed session_id.
+            'username'           => $username !== null ? (string)$username : null,
+            'model'              => $responseData['model'] ?? ($requestData['model'] ?? 'unknown'),
+            'timestamp'          => date('Y-m-d H:i:s'),
+            'user_message'       => $userMessage,
+            'assistant_response' => $assistant,
+        ];
+        if (!empty($responseData['tools_used'])) {
+            $atomicPayload['tools_used'] = $responseData['tools_used'];
+        }
+        if (!empty($responseData['usage'])) {
+            $atomicPayload['usage'] = $responseData['usage'];
+        }
+        if ($isError) {
+            $atomicPayload['error'] = true;
+        }
+
+        $action = new SecureChatLog($this);
+        $action->setValue('message', json_encode($atomicPayload));
+        $action->setValue('record', $isError ? 'CappyChatTurnError' : 'CappyChatTurn');
+        if ($project_id) {
+            $action->setValue('project_id', $project_id);
+        }
+        $action->setValue('session_id', $requestData['session_id']);
+        if (!empty($atomicPayload['model'])) {
+            $action->setValue('model', $atomicPayload['model']);
+        }
+        $action->save();
+    }
+
     private function logInteraction($project_id, $requestData, $responseData)
     {
         // Extract atomic log data - only the current turn, not full conversation history
@@ -2396,7 +2654,12 @@ private function toOpenAIToolsShape(array $tools): array
                     ];
                 }
 
-                $session = \Stanford\SecureChatAI\SecureChatLog::rehydrateSession($this, $session_id, $project_id);
+                // Use the same rehydration path as the chatbot (prefers clean
+                // CappyChatTurn rows, backfills pre-turn legacy history) so the
+                // two "rehydrate a session" entry points don't diverge. This is
+                // the token-API path (no browser user), so it is not user-scoped
+                // — the API token is the authorization boundary here.
+                $session = $this->rehydrateProjectSession($session_id, $project_id);
 
                 return [
                     "status"  => 200,
