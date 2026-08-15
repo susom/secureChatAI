@@ -12,6 +12,7 @@ function createTable($action, $index) {
     $project_id = $action['project_id'] ?? 'N/A';
     $record = $action['record'] ?? 'N/A';
     $session_id = $action['session_id'] ?? 'N/A';
+    $username = $action['username'] ?? '';
 
     // Support both old format (choices/messages) and new atomic format (user_message/assistant_response)
     // Extract tools_used for agent mode display
@@ -66,6 +67,11 @@ function createTable($action, $index) {
     $safeTimestamp = htmlspecialchars($timestamp, ENT_QUOTES, 'UTF-8');
     $safeModel = htmlspecialchars($model, ENT_QUOTES, 'UTF-8');
     $safeSessionId = htmlspecialchars($session_id, ENT_QUOTES, 'UTF-8');
+    $safeUsername = htmlspecialchars(
+        $username === '' ? '—' : (string)$username,
+        ENT_QUOTES,
+        'UTF-8'
+    );
     $safeCompletionTokens = htmlspecialchars($completionTokens, ENT_QUOTES, 'UTF-8');
     $safePromptTokens = htmlspecialchars($promptTokens, ENT_QUOTES, 'UTF-8');
     $safeTotalTokens = htmlspecialchars($totalTokens, ENT_QUOTES, 'UTF-8');
@@ -81,6 +87,7 @@ function createTable($action, $index) {
                 <td>{$safeTimestamp}</td>
                 <td>{$safeModel}</td>
                 <td class='session-id-column'>{$safeSessionId}</td>
+                <td class='user-column'>{$safeUsername}</td>
                 <td>
                     <div class='accordion' id='accordionTokens-{$index}'>
                         <div class='accordion-item'>
