@@ -128,12 +128,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                     LIMIT 1
                 )
                 AND record IN ('SecureChatLog', 'SecureChatLogError')
-                AND message LIKE ?
+                AND (message LIKE ? OR message LIKE ?)
                 ORDER BY log_id DESC
                 LIMIT 1000 OFFSET ?";
         $pattern = '%"project_id":' . $pid . '%';
+        $patternSpaced = '%"project_id": ' . $pid . '%';
         $prefix = $this->PREFIX;
-        $result = $this->query($sql, [$prefix, $pattern, $offset]);
+        $result = $this->query($sql, [$prefix, $pattern, $patternSpaced, $offset]);
 
         $logs = [];
         while ($row = $result->fetch_assoc()) {
@@ -467,7 +468,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
                     // Normal single-call path
                     $startLLMCall = microtime(true);
-                    $response = $this->callLLMOnce($model, $params, $project_id);
+                    $response = $this->callLLMOnce($model, $params, $project_id, $username);
                     $this->emDebug("callAI timing - callLLMOnce", [
                         'duration_ms' => round((microtime(true) - $startLLMCall) * 1000, 2)
                     ]);
@@ -987,7 +988,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'last_message_length' => strlen(end($messages)['content'] ?? '')
             ]);
 
-            $response = $this->callLLMOnce($model, $params, $project_id);
+            $response = $this->callLLMOnce($model, $params, $project_id, $username);
             // PHI-safe: log only response metadata (token usage, model, shape) — never the
             // raw content body, which can contain prompt/response PHI.
             $this->emDebug("AGENT RAW RESPONSE (metadata only)", $this->summarizeResponseForDebug($response));
@@ -1149,7 +1150,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         );
     }
 
-    private function callLLMOnce(string $model, array $params, ?int $project_id): array
+    private function callLLMOnce(string $model, array $params, ?int $project_id, ?string $username = null): array
     {
         $this->initSecureChatAI();
 
@@ -1206,7 +1207,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $normalizedResponse = $this->normalizeResponse($responseData, $model);
 
         if ($project_id) {
-            $this->logInteraction($project_id, $params, $responseData);
+            $this->logInteraction($project_id, $params, $responseData, $username);
         }
 
         return $normalizedResponse;
@@ -2321,12 +2322,15 @@ private function toOpenAIToolsShape(array $tools): array
         $action->save();
     }
 
-    private function logInteraction($project_id, $requestData, $responseData)
+    private function logInteraction($project_id, $requestData, $responseData, $username = null)
     {
         // Extract atomic log data - only the current turn, not full conversation history
         $atomicPayload = [
             'project_id' => $project_id,
             'session_id' => $requestData['session_id'] ?? null,
+            // REDCap login of the requesting user (not PHI). Older SecureChatLog
+            // rows predate this, so the usage dashboard shows them as "not logged".
+            'username' => $username !== null ? (string)$username : null,
             'model' => $responseData['model'] ?? ($requestData['model'] ?? 'unknown'),
             'timestamp' => date('Y-m-d H:i:s')
         ];
