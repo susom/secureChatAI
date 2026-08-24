@@ -34,6 +34,31 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 {
     use emLoggerTrait;
 
+    /**
+     * Models that support the json_schema response format, in PREFERENCE ORDER.
+     *
+     * Two consumers, and only one of them cares about the order:
+     *   - filterDefaultParamsForModel(): membership test only (order irrelevant)
+     *   - runAgentLoop(): takes the FIRST entry present in api-settings as the
+     *     fallback when the requested model can't do schemas. Whatever sits at the
+     *     front is what every agent-mode turn silently runs on.
+     *
+     * gpt-4-1 used to be first, so it was always the pick — dated, and the lowest
+     * Azure quota of the group (1000/2000 vs gpt-5-4's 1500/3000). Ordering is now
+     * newest full models, then older full models, then reasoning models, with the
+     * nanos last: cheapest quota but weakest at the multi-step tool reasoning agent
+     * mode depends on.
+     *
+     * Was duplicated as a local in both methods; a capability list that drifts
+     * between copies is a silent "Unsupported model" mid-loop, so it lives here.
+     */
+    private const SCHEMA_CAPABLE_MODELS = [
+        'gpt-5-4', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra', 'gpt-5',
+        'gpt-4-1',
+        'o3', 'o4-mini', 'o1', 'o3-mini',
+        'gpt-5-4-nano', 'gpt-4-1-nano',
+    ];
+
     private array $defaultParams;
     private $guzzleClient = null;
     private $guzzleTimeout = 5.0;
@@ -397,8 +422,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
 
         // Only models supporting json_schema
-        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra', 'o1', 'o3', 'o3-mini', 'o4-mini'];
-        if (!in_array($model, $schemaModels)) {
+        if (!in_array($model, self::SCHEMA_CAPABLE_MODELS, true)) {
             unset($merged['json_schema']);
         }
 
@@ -891,11 +915,10 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // silently switch to an alias that isn't in $this->modelConfig (which
         // would throw "Unsupported model" mid-loop and surface as a generic
         // "network difficulties" error to the user).
-        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra', 'o1', 'o3', 'o3-mini', 'o4-mini'];
-        if (!in_array($model, $schemaModels)) {
+        if (!in_array($model, self::SCHEMA_CAPABLE_MODELS, true)) {
             $configured = array_keys($this->modelConfig);
             $fallback = null;
-            foreach ($schemaModels as $candidate) {
+            foreach (self::SCHEMA_CAPABLE_MODELS as $candidate) {
                 if (in_array($candidate, $configured, true)) {
                     $fallback = $candidate;
                     break;
@@ -903,7 +926,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             }
             if ($fallback === null) {
                 throw new \Exception(
-                    "Agent mode requires a schema-capable model but none of [" . implode(', ', $schemaModels)
+                    "Agent mode requires a schema-capable model but none of [" . implode(', ', self::SCHEMA_CAPABLE_MODELS)
                     . "] are configured in SecureChatAI's api-settings. Add one, or disable agent mode for this project."
                 );
             }
