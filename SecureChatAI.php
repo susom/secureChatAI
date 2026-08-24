@@ -390,19 +390,19 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $merged = array_merge($this->defaultParams, $params);
 
         // Only o1/o3-mini/gpt-5 get reasoning params
-        if (!in_array($model, ['o1', 'o3-mini', 'gpt-5'])) {
+        if (!in_array($model, ['o1', 'o3-mini', 'gpt-5', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra'])) {
             unset($merged['reasoning']);
             unset($merged['reasoning_effort']);
         }
 
         // Only models supporting json_schema
-        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'o1', 'o3', 'o3-mini', 'o4-mini'];
+        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra', 'o1', 'o3', 'o3-mini', 'o4-mini'];
         if (!in_array($model, $schemaModels)) {
             unset($merged['json_schema']);
         }
 
         // Only reasoning models have strict param set (use max_completion_tokens)
-        if (in_array($model, ['o1', 'o3-mini', 'o3', 'o4-mini', 'gpt-5'])) {
+        if (in_array($model, ['o1', 'o3-mini', 'o3', 'o4-mini', 'gpt-5', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra'])) {
             $strict = [
                 'model' => $model,
                 'messages' => $merged['messages'] ?? [],
@@ -890,7 +890,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // silently switch to an alias that isn't in $this->modelConfig (which
         // would throw "Unsupported model" mid-loop and surface as a generic
         // "network difficulties" error to the user).
-        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'o1', 'o3', 'o3-mini', 'o4-mini'];
+        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra', 'o1', 'o3', 'o3-mini', 'o4-mini'];
         if (!in_array($model, $schemaModels)) {
             $configured = array_keys($this->modelConfig);
             $fallback = null;
@@ -933,7 +933,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         // CRITICAL: Agent mode needs higher token limit to avoid truncation mid-JSON
         // Reasoning models use max_completion_tokens, others use max_tokens
-        if (in_array($model, ['o1', 'o3-mini', 'o3', 'o4-mini'])) {
+        if (in_array($model, ['o1', 'o3-mini', 'o3', 'o4-mini', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra'])) {
             $params['max_completion_tokens'] = 32000;
         } else {
             $params['max_tokens'] = 4000;
@@ -1802,7 +1802,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         try {
             // Use correct token param for this model
-            $o1Models = ['o1', 'o3-mini', 'o3', 'o4-mini'];
+            $o1Models = ['o1', 'o3-mini', 'o3', 'o4-mini', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra'];
             $tokenParam = in_array($summarizeModel, $o1Models)
                 ? 'max_completion_tokens'
                 : 'max_tokens';
@@ -1869,6 +1869,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'gpt-5'            => ['context' => 400000],
             'gpt-5-4'          => ['context' => 400000],
             'gpt-5-4-nano'     => ['context' => 400000],
+            'gpt-5-6-sol'      => ['context' => 400000],
+            'gpt-5-6-luna'     => ['context' => 400000],
+            'gpt-5-6-terra'    => ['context' => 400000],
             'gpt-5-nano'       => ['context' => 400000],
             'grok-3'           => ['context' => 128000],
             'grok-3-mini'      => ['context' => 128000],
@@ -1946,9 +1949,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             ],
             'gpt-5' => [
                 'context' => 400000,
-                'output_max' => 128000,
-                'param' => 'max_tokens',
-                'buffer' => 2000
+                'output_max' => 100000,
+                'param' => 'max_completion_tokens',
+                'buffer' => 25000
             ],
             'gpt-5-4' => [
                 'context' => 400000,
@@ -1961,6 +1964,24 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 'output_max' => 128000,
                 'param' => 'max_tokens',
                 'buffer' => 2000
+            ],
+            'gpt-5-6-sol' => [
+                'context' => 400000,
+                'output_max' => 100000,
+                'param' => 'max_completion_tokens',
+                'buffer' => 25000
+            ],
+            'gpt-5-6-luna' => [
+                'context' => 400000,
+                'output_max' => 100000,
+                'param' => 'max_completion_tokens',
+                'buffer' => 25000
+            ],
+            'gpt-5-6-terra' => [
+                'context' => 400000,
+                'output_max' => 100000,
+                'param' => 'max_completion_tokens',
+                'buffer' => 25000
             ],
             'claude' => [
                 'context' => 200000,
@@ -2611,7 +2632,7 @@ private function toOpenAIToolsShape(array $tools): array
                 if ($stop !== null) $params['stop'] = $stop;
 
                 // Handle max_tokens vs max_completion_tokens
-                if (in_array($mappedModel, ['o1', 'o3-mini', 'gpt-5'])) {
+                if (in_array($mappedModel, ['o1', 'o3-mini', 'gpt-5', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra'])) {
                     $params['max_completion_tokens'] = $max_tokens;
                 } else {
                     $params['max_tokens'] = $max_tokens;
