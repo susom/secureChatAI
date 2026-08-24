@@ -40,6 +40,7 @@ $a = $module->getProjectSecureChatLogs($current_pid, $offset);
 $uniqueModels = [];
 $uniqueTypes = [];
 $uniqueSessionIds = [];
+$uniqueUsers = [];
 
 $allLogs = [];
 
@@ -58,6 +59,7 @@ foreach ($a as $index => $action) {
     if (!empty($action['model'])) $uniqueModels[$action['model']] = true;
     if (!empty($action['record'])) $uniqueTypes[$action['record']] = true;
     if (!empty($action['session_id'])) $uniqueSessionIds[$action['session_id']] = true;
+    if (!empty($action['username'])) $uniqueUsers[$action['username']] = true;
 }
 
 // Create table rows
@@ -76,9 +78,11 @@ foreach ($allLogs as $index => $action) {
 $uniqueModels = array_keys($uniqueModels);
 $uniqueTypes = array_keys($uniqueTypes);
 $uniqueSessionIds = array_keys($uniqueSessionIds);
+$uniqueUsers = array_keys($uniqueUsers);
 sort($uniqueModels);
 sort($uniqueTypes);
 sort($uniqueSessionIds);
+sort($uniqueUsers);
 
 // Pass data to JavaScript for analytics
 $logsJson = json_encode($allLogs);
@@ -228,6 +232,21 @@ $safePid = htmlspecialchars($current_pid, ENT_QUOTES, 'UTF-8');
                 </div>
             </div>
 
+            <!-- Usage by User -->
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="chart-container">
+                        <div class="chart-actions">
+                            <button class="chart-btn" onclick="downloadChart('userChart')" title="Download as PNG">📥</button>
+                            <button class="chart-btn" onclick="toggleFullscreen(this)" title="Fullscreen">⛶</button>
+                        </div>
+                        <div class="chart-title">Usage by User</div>
+                        <div class="chart-subtitle">API calls per REDCap user (older logs predate user capture and show as "not logged")</div>
+                        <svg id="userChart" height="300"></svg>
+                    </div>
+                </div>
+            </div>
+
             <!-- Cost Analysis -->
             <div class="row">
                 <div class="col-md-12">
@@ -332,6 +351,15 @@ $safePid = htmlspecialchars($current_pid, ENT_QUOTES, 'UTF-8');
                 </select>
             </div>
             <div class="col-md-3">
+                <label class="form-label">User</label>
+                <select class="form-select form-select-sm" id="userFilter">
+                    <option value="">All Users</option>
+                    <?php foreach ($uniqueUsers as $user): ?>
+                        <option value="<?= htmlspecialchars($user, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($user, ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-3">
                 <label class="form-label">Agent Mode Only</label>
                 <div class="form-check form-switch">
                     <input class="form-check-input" type="checkbox" id="agentModeFilter">
@@ -368,6 +396,7 @@ $safePid = htmlspecialchars($current_pid, ENT_QUOTES, 'UTF-8');
                     <th>Timestamp</th>
                     <th>Model</th>
                     <th>Session ID</th>
+                    <th>User</th>
                     <th>Tokens</th>
                     <th>Model Meta</th>
                     <th>Query</th>
