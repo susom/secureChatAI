@@ -67,42 +67,69 @@ API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/gpt-5-
 API Input Var: messages
 Default: no
 
---- Model 10 ---
+NOTE: the three gpt-5-6-* deployments below are REASONING-CLASS. They reject
+max_tokens, and reject any non-default temperature/top_p/frequency_penalty.
+SecureChatAI routes them accordingly (strict param set + max_completion_tokens).
+Their api-version is 2025-04-01-preview, which -- unlike the 2024-06-01 used by
+the rows above -- is inside the enum the AI Hub service spec accepts.
+
+--- Model 10 (PENDING REGISTRATION - not yet in prod) ---
+Alias: gpt-5-6-sol
+Model ID: gpt-5-6-sol
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/gpt-5-6-sol/chat/completions?api-version=2025-04-01-preview
+API Input Var: messages
+Default: no
+
+--- Model 11 (PENDING REGISTRATION - not yet in prod) ---
+Alias: gpt-5-6-luna
+Model ID: gpt-5-6-luna
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/gpt-5-6-luna/chat/completions?api-version=2025-04-01-preview
+API Input Var: messages
+Default: no
+
+--- Model 12 (PENDING REGISTRATION - not yet in prod) ---
+Alias: gpt-5-6-terra
+Model ID: gpt-5-6-terra
+API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/gpt-5-6-terra/chat/completions?api-version=2025-04-01-preview
+API Input Var: messages
+Default: no
+
+--- Model 13 ---
 Alias: o3
 Model ID: o3
 API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/o3/chat/completions?api-version=2024-12-01-preview
 API Input Var: messages
 Default: no
 
---- Model 11 ---
+--- Model 14 ---
 Alias: o4-mini
 Model ID: o4-mini
 API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/o4-mini/chat/completions?api-version=2024-12-01-preview
 API Input Var: messages
 Default: no
 
---- Model 12 ---
+--- Model 15 ---
 Alias: text-embedding-3-small
 Model ID: text-embedding-3-small
 API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/text-embedding-3-small/embeddings?api-version=2024-06-01
 API Input Var: input
 Default: no
 
---- Model 13 ---
+--- Model 16 ---
 Alias: text-embedding-3-large
 Model ID: text-embedding-3-large
 API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/text-embedding-3-large/embeddings?api-version=2024-06-01
 API Input Var: input
 Default: no
 
---- Model 14 ---
+--- Model 17 ---
 Alias: tts-hd
 Model ID: tts-hd
 API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/tts-hd/audio/speech?api-version=2024-12-01-preview
 API Input Var: input
 Default: no
 
---- Model 15 ---
+--- Model 18 ---
 Alias: whisper
 Model ID: whisper
 API URL: https://aihubapi.stanfordhealthcare.org/azure-openai/deployments/whisper/audio/transcriptions?api-version=2024-06-01

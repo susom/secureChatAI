@@ -6,6 +6,15 @@
 // Model pricing (per 1M tokens). Base rates unless noted.
 const MODEL_PRICING = {
     // Azure AI Foundry (base)
+    // PROVISIONAL. AI Hub publishes no dollar rates for the 5.6 line — the
+    // service spec gives TPM thresholds only. This borrows the 5.4 tier, which
+    // is a guess: the spec puts all three 5.6 variants at 2500/5000 TPM, the
+    // same tier as gpt-5-5, not as gpt-5-4 (1500/3000). Replace when rates
+    // publish. Listed explicitly anyway, because without a key the /^gpt-5/
+    // catch-all would price 5.6 traffic at 5.2 rates and say nothing.
+    // One shared key: sol/luna/terra are billed alike here only because
+    // nothing distinguishes them yet. Split it the moment they differ.
+    'gpt-5.6': { prompt: 2.5, completion: 15 },
     'gpt-5.4-pro': { prompt: 30, completion: 180 },
     'gpt-5.4': { prompt: 2.5, completion: 15 },
     'gpt-5.2': { prompt: 1.75, completion: 14 },
@@ -45,6 +54,15 @@ const MODEL_PRICING = {
 };
 
 const MODEL_ALIASES = [
+    // All 5.6 variants share one rate key; these must stay above the /^gpt-5/
+    // catch-all below, which would otherwise bill them at 5.2 rates.
+    { match: /^gpt-5\.6-sol/, key: 'gpt-5.6' },
+    { match: /^gpt-5-6-sol/, key: 'gpt-5.6' },
+    { match: /^gpt-5\.6-luna/, key: 'gpt-5.6' },
+    { match: /^gpt-5-6-luna/, key: 'gpt-5.6' },
+    { match: /^gpt-5\.6-terra/, key: 'gpt-5.6' },
+    { match: /^gpt-5-6-terra/, key: 'gpt-5.6' },
+
     { match: /^gpt-5\.4-pro/, key: 'gpt-5.4-pro' },
     { match: /^gpt-5-4-pro/, key: 'gpt-5.4-pro' },
     { match: /^gpt-5\.4/, key: 'gpt-5.4' },

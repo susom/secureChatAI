@@ -114,7 +114,24 @@ This separation ensures:
 - `gemini-2.5-flash`, `gemini-2.5-pro`
 
 **Via AI Hub — Azure AI Foundry:**
-- `deepseek-r1`, `gpt-4-1`, `gpt-4-1-nano`, `gpt-5-4`, `gpt-5-4-nano`, `grok-3`, `o3`, `o4-mini`
+- `deepseek-r1`, `gpt-4-1`, `gpt-4-1-nano`, `gpt-5-4`, `gpt-5-4-nano`, `gpt-5-6-sol`, `gpt-5-6-luna`, `gpt-5-6-terra`, `grok-3`, `o3`, `o4-mini`
+
+> `gpt-5-6-sol` / `-luna` / `-terra` are **reasoning-class**, not ordinary chat
+> models — verified live against AI Hub on 2026-08-24 (resolved model
+> `gpt-5.6-sol-2026-07-09`):
+>
+> | Parameter | Result |
+> |---|---|
+> | `max_tokens` | **400** — `Use 'max_completion_tokens' instead` |
+> | `temperature` ≠ 1 | **400** — `Only the default (1) value is supported` |
+> | `top_p` ≠ 1 | **400** — `not supported with this model` |
+> | `frequency_penalty` ≠ 0 | **400** — `not supported with this model` |
+> | `max_completion_tokens`, `reasoning_effort`, `response_format` (json_schema, `strict`), `tools` | accepted |
+>
+> So they are routed with `o1`/`o3-mini`/`o3`/`o4-mini`/`gpt-5` — strict param
+> set, `max_completion_tokens` — and **not** like `gpt-5-4`. Any project-level
+> temperature/top-p/penalty setting is inert for them. Each alias still needs its
+> own `api-settings` row; see `model_settings_prod.txt`.
 
 ### Embeddings
 - `text-embedding-3-small`, `text-embedding-3-large`
