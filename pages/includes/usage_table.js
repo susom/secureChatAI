@@ -39,11 +39,11 @@ $(document).ready(function() {
         "order": [[0, 'desc']], // Default sort by ID descending (newest first)
         "columnDefs": [
             {
-                "targets": 5,
+                "targets": 7,
                 "orderDataType": "tokens-sort"
             },
             {
-                "targets": 9,
+                "targets": 11,
                 "orderDataType": "tools-sort"
             }
         ],
@@ -71,6 +71,13 @@ $(document).ready(function() {
         table.column(5).search(this.value).draw();
     });
 
+    // User filter
+    $('#userFilter').on('change', function() {
+        // Exact-match on the User column (col 6) to avoid partial-name collisions
+        var val = this.value;
+        table.column(6).search(val ? '^' + $.fn.dataTable.util.escapeRegex(val) + '$' : '', true, false).draw();
+    });
+
     // Agent mode filter
     $('#agentModeFilter').on('change', function() {
         if (this.checked) {
@@ -95,7 +102,7 @@ $(document).ready(function() {
     $('#exportBtn').on('click', function() {
         // Get filtered/sorted data
         var data = table.rows({ search: 'applied' }).data();
-        var csv = 'ID,Project ID,Type,Timestamp,Model,Tokens,Temperature,Top P,Freq Penalty,Pres Penalty\n';
+        var csv = 'ID,Project ID,Type,Timestamp,Model,User\n';
 
         data.each(function(row) {
             // Extract data from HTML (simplified for CSV)
@@ -104,7 +111,8 @@ $(document).ready(function() {
             csv += '"' + row[1] + '",';  // Project ID
             csv += '"' + row[2] + '",';  // Type
             csv += '"' + row[3] + '",';  // Timestamp
-            csv += '"' + row[4] + '"\n'; // Model
+            csv += '"' + row[4] + '",';  // Model
+            csv += '"' + (row[6] || '') + '"\n'; // User
         });
 
         var blob = new Blob([csv], { type: 'text/csv' });

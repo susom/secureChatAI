@@ -162,6 +162,7 @@ function initAnalyticsDashboard() {
     // Render charts
     renderTokensChart(processedData, 'hourly');
     renderModelChart(processedData);
+    renderUserChart(processedData);
     renderCostChart(processedData);
     renderHeatmap(processedData);
     renderAgentFlow(processedData);
@@ -194,6 +195,7 @@ function processLogsData(logs) {
     const modelCosts = {};
     const heatmapData = Array(7).fill(0).map(() => Array(24).fill(0));
     const toolSequences = [];
+    const userStats = {};
 
     console.log('Processing logs:', logs.length);
     console.log('Start of day:', startOfDay);
@@ -266,6 +268,15 @@ function processLogsData(logs) {
         modelCounts[model] = (modelCounts[model] || 0) + 1;
         modelCosts[model] = (modelCosts[model] || 0) + cost;
 
+        // User distribution (username lives in the atomic log message blob).
+        // Older logs predate username capture, so bucket those as "(not logged)".
+        const rawUser = (log.username == null || String(log.username).trim() === '')
+            ? '(not logged)'
+            : String(log.username).trim();
+        if (!userStats[rawUser]) userStats[rawUser] = { calls: 0, tokens: 0 };
+        userStats[rawUser].calls += 1;
+        userStats[rawUser].tokens += totalTokens;
+
         // Heatmap (hour x day of week)
         const hour = timestamp.getHours();
         const day = timestamp.getDay(); // 0 = Sunday
@@ -316,6 +327,7 @@ function processLogsData(logs) {
         dailyData,
         modelCounts,
         modelCosts,
+        userStats,
         heatmapData,
         toolSequences
     };
@@ -702,6 +714,115 @@ function renderModelChart(data) {
             .style('font-size', '11px')
             .text(d.name.length > 20 ? d.name.substring(0, 18) + '...' : d.name);
     });
+}
+
+function renderUserChart(data) {
+    const svg = d3.select('#userChart');
+    if (svg.empty() || !svg.node()) return;
+
+    const container = svg.node().parentElement;
+    const width = container.clientWidth;
+
+    // Top users by call count; long tail collapsed into a single bucket.
+    const entries = Object.entries(data.userStats || {})
+        .map(([name, s]) => ({ name, calls: s.calls, tokens: s.tokens }))
+        .sort((a, b) => b.calls - a.calls);
+
+    const MAX_BARS = 12;
+    let bars = entries;
+    if (entries.length > MAX_BARS) {
+        const head = entries.slice(0, MAX_BARS - 1);
+        const rest = entries.slice(MAX_BARS - 1);
+        const other = rest.reduce((acc, d) => {
+            acc.calls += d.calls;
+            acc.tokens += d.tokens;
+            return acc;
+        }, { name: `Other (${rest.length} users)`, calls: 0, tokens: 0 });
+        bars = head.concat(other);
+    }
+
+    const rowHeight = 28;
+    const margin = { top: 10, right: 60, bottom: 20, left: 150 };
+    const height = Math.max(120, bars.length * rowHeight + margin.top + margin.bottom);
+
+    svg.attr('viewBox', `0 0 ${width} ${height}`);
+    svg.attr('height', height);
+    svg.selectAll('*').remove();
+
+    if (bars.length === 0) {
+        svg.append('text')
+            .attr('x', width / 2)
+            .attr('y', 60)
+            .attr('text-anchor', 'middle')
+            .style('fill', '#888')
+            .text('No user data available');
+        return;
+    }
+
+    const innerWidth = Math.max(10, width - margin.left - margin.right);
+    const g = svg.append('g')
+        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const y = d3.scaleBand()
+        .domain(bars.map(d => d.name))
+        .range([0, bars.length * rowHeight])
+        .padding(0.2);
+
+    const x = d3.scaleLinear()
+        .domain([0, d3.max(bars, d => d.calls) || 1])
+        .range([0, innerWidth]);
+
+    const color = d3.scaleOrdinal()
+        .range(['#667eea', '#764ba2', '#f093fb', '#f5576c', '#11998e', '#38ef7d', '#4facfe', '#00f2fe']);
+
+    const tooltip = d3.select('#d3-tooltip');
+
+    g.selectAll('rect')
+        .data(bars)
+        .enter().append('rect')
+        .attr('y', d => y(d.name))
+        .attr('x', 0)
+        .attr('height', y.bandwidth())
+        .attr('width', d => x(d.calls))
+        .attr('fill', (d, i) => color(i))
+        .attr('rx', 3)
+        .style('cursor', 'pointer')
+        .on('mouseover', function(event, d) {
+            d3.select(this).attr('opacity', 0.8);
+            const pct = data.totalCalls > 0 ? ((d.calls / data.totalCalls) * 100).toFixed(1) : 0;
+            tooltip.style('opacity', 1)
+                .html(`
+                    <strong>${escapeHtml(d.name)}</strong><br>
+                    Calls: ${d.calls} (${pct}%)<br>
+                    Tokens: ${d.tokens.toLocaleString()}
+                `)
+                .style('left', (event.pageX + 10) + 'px')
+                .style('top', (event.pageY - 10) + 'px');
+        })
+        .on('mouseout', function() {
+            d3.select(this).attr('opacity', 1);
+            tooltip.style('opacity', 0);
+        });
+
+    // Value labels at bar end
+    g.selectAll('.bar-value')
+        .data(bars)
+        .enter().append('text')
+        .attr('class', 'bar-value')
+        .attr('x', d => x(d.calls) + 5)
+        .attr('y', d => y(d.name) + y.bandwidth() / 2)
+        .attr('dy', '0.35em')
+        .style('font-size', '11px')
+        .style('fill', '#555')
+        .text(d => d.calls);
+
+    // User name labels (left axis)
+    g.append('g')
+        .call(d3.axisLeft(y).tickSize(0))
+        .call(g => g.select('.domain').remove())
+        .selectAll('text')
+        .style('font-size', '11px')
+        .text(d => d.length > 20 ? d.substring(0, 18) + '...' : d);
 }
 
 function renderCostChart(data) {
@@ -1152,6 +1273,7 @@ function updateChartsSmooth(data) {
     setTimeout(() => {
         renderTokensChart(data, currentTimeRange); // Preserve selected time range
         renderModelChart(data);
+        renderUserChart(data);
         renderCostChart(data);
         renderHeatmap(data);
         renderAgentFlow(data);
