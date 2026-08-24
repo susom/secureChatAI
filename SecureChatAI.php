@@ -943,6 +943,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $step = 0;
         $tools_called = 0;
         $tool_call_history = []; // Track tool calls to detect loops
+        // PHI-safe parallel to $tool_call_history for logging. The real signatures
+        // embed json_encode($arguments), which can carry record data and filter
+        // literals ([first_name]='Smith') — never loggable. These carry the SHAPE
+        // only: tool name + sorted argument key names.
+        $tool_call_shapes = [];
         $tools_used = []; // Track tools used for UI display
 
         // Inject router system prompt + tool catalog
@@ -1087,12 +1092,40 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 // Detect tool ping-pong loops (same tool+args called repeatedly)
                 $callSignature = $tool_name . ':' . json_encode($arguments);
                 $tool_call_history[] = $callSignature;
+                $argKeys = is_array($arguments) ? array_keys($arguments) : [];
+                sort($argKeys);
+                // Flag the OUTCOME, not just the call. A tool that returns
+                // {error:true,...} is the usual reason a model retries and loops, and
+                // that error lives in the RESULT payload — $execution['error'] is
+                // always false here, since line 1057 returns early on a hard failure.
+                // Hook denials surface as result.status='denied' with error=false.
+                $outcome = '';
+                if (is_array($execution['result'] ?? null)) {
+                    if (!empty($execution['result']['error'])) {
+                        $outcome = ' [ERR]';
+                    } elseif (($execution['result']['status'] ?? '') === 'denied') {
+                        $outcome = ' [DENIED]';
+                    }
+                }
+                $tool_call_shapes[] = $tool_name . '(' . implode(',', $argKeys) . ')' . $outcome;
 
                 // Check for loops: same signature appearing 3+ times in last 5 calls
                 if (count($tool_call_history) >= 5) {
                     $recentCalls = array_slice($tool_call_history, -5);
                     $signatureCounts = array_count_values($recentCalls);
                     if (max($signatureCounts) >= 3) {
+                        // Log the whole 5-call window, not just a repeat count. Seeing
+                        // the SEQUENCE is what makes these diagnosable — e.g. "call 1
+                        // errored, so the model re-queried, then repeated the same
+                        // paging call" reads very differently from "called X 3 times".
+                        // PHI-safe: shapes only (see $tool_call_shapes above).
+                        $this->emDebug("TOOL_LOOP_DETECTED — breaking agent loop", [
+                            'step'          => $step,
+                            'tools_called'  => $tools_called,
+                            'elapsed_sec'   => time() - $start_time,
+                            'repeat_count'  => max($signatureCounts),
+                            'recent_shapes' => array_slice($tool_call_shapes, -5),
+                        ]);
                         return $this->agentError(
                             "TOOL_LOOP_DETECTED",
                             "Agent is repeatedly calling the same tool. Breaking loop to prevent infinite execution."
@@ -1408,6 +1441,21 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     private function agentError(string $type, string $message): array
     {
+        // Log EVERY agent abort here rather than at the ~10 call sites. The user only
+        // ever sees a deliberately vague apology (see the AGENT_ERROR_MESSAGES map),
+        // so without this the log showed nothing but AGENT STEP lines stopping dead —
+        // there was no way to answer "why did Cappy give up?" after the fact.
+        //
+        // PHI-safe: $type is a fixed constant and $message is a developer-authored
+        // diagnostic. Neither carries record data. Callers that have richer context
+        // (the loop detector, the tool-limit checks) log it themselves just before
+        // calling, so this stays the backstop rather than the whole story.
+        //
+        // Sub-agent aborts land here too and look identical to top-level ones; the
+        // $type is enough to tell them apart in practice (MAX_DEPTH_EXCEEDED,
+        // SUBAGENTS_DISABLED and MISSING_PROMPT only come from the spawn path).
+        $this->emDebug("AGENT ABORT [{$type}]", ['message' => $message]);
+
         return [
             'error' => true,
             'type' => $type,
@@ -1600,6 +1648,29 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             $truncated = substr($result, 0, $maxChars - 100);
             $truncated .= "\n\n[... truncated " . ($originalSize - strlen($truncated)) . " characters to fit token budget]";
         }
+
+        // Never truncate silently. Reaching this line means we're over the cap (the
+        // under-limit case returned early), so log unconditionally — that covers all
+        // three branches above and any added later.
+        //
+        // This blind spot hid a real bug: records.search puts its (potentially huge)
+        // `records` payload in the LAST key, the object branch above stops at the first
+        // key that doesn't fit, so a model that explicitly passed include_records=true
+        // got a response with `records` quietly gone — and looped asking for it again.
+        // The dropped key names are the whole diagnostic.
+        //
+        // PHI-safe: key NAMES and byte counts only, never values.
+        $droppedKeys = (is_array($result) && is_array($truncated) && !array_is_list($result))
+            ? array_values(array_diff(array_keys($result), array_keys($truncated)))
+            : [];
+        $this->emDebug("TOOL RESULT TRUNCATED", [
+            'shape'          => is_array($result)
+                ? (array_is_list($result) ? 'list' : 'object')
+                : gettype($result),
+            'original_chars' => $originalSize,
+            'max_chars'      => $maxChars,
+            'dropped_keys'   => $droppedKeys,
+        ]);
 
         return $truncated;
     }
