@@ -1629,7 +1629,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 $valueJson = json_encode($value, JSON_UNESCAPED_UNICODE);
                 $itemSize = strlen($key) + strlen($valueJson) + 4; // key + value + quotes/colon
 
-                if ($currentSize + $itemSize > $maxChars - 200) {
+                // Reserve room for the truncation metadata below. It used to be a
+                // one-line message that fit in 200; the explanatory version plus
+                // _dropped_keys needs more, and overshooting $maxChars would defeat
+                // the point of the cap.
+                if ($currentSize + $itemSize > $maxChars - 700) {
                     $wasTruncated = true;
                     break;
                 }
@@ -1639,8 +1643,21 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             }
 
             if ($wasTruncated) {
+                // Name the dropped keys FOR THE MODEL, not just for our log. The old
+                // message said only "truncated to fit token budget", so a model that
+                // asked for a specific key (records.search + include_records=true)
+                // received a response with that key silently absent, no indication it
+                // had ever existed, and a tool `note` telling it to ask again — so it
+                // did, until the loop detector killed the turn. Telling it what is
+                // gone and that retrying won't help is what breaks that cycle.
+                $droppedKeys = array_values(array_diff(array_keys($result), array_keys($truncated)));
                 $truncated['_truncated'] = true;
-                $truncated['_message'] = "Result truncated to fit token budget.";
+                $truncated['_dropped_keys'] = $droppedKeys;
+                $truncated['_message'] = "Result truncated to fit token budget. "
+                    . "These keys were REMOVED and are NOT available: " . implode(', ', $droppedKeys) . ". "
+                    . "Requesting them again will produce the same truncation — do not retry. "
+                    . "Answer from the keys you did receive, or narrow the query (add a "
+                    . "filter, or request fewer records via limit) so the result fits.";
             }
         }
         // Handle strings - simple truncation
