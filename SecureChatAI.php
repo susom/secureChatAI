@@ -1333,11 +1333,27 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             str_contains($result->errorMessage ?? '', 'denied by hook') ||
             str_contains($result->errorMessage ?? '', 'Blocked by')
         )) {
+            // Denials were previously invisible in the EM log — hooks report via
+            // error_log(), which lands in php_errors.log with no request id, so a
+            // denied turn could not be correlated with the rest of the trace. Log it
+            // here, where we still have the request context.
+            // PHI-safe: tool name plus a developer-authored hook message.
+            $this->emDebug("TOOL DENIED BY HOOK", [
+                'tool'    => $tool_name,
+                'message' => $result->errorMessage,
+            ]);
             return [
                 'error'  => false,
                 'result' => [
                     'status'  => 'denied',
-                    'message' => $result->errorMessage,
+                    // A denial is TERMINAL — a hook is deterministic, so the identical
+                    // call denies identically. Saying so is what stops the retry loop:
+                    // page.highlight was denied 5x in a row on PID 70 and the model
+                    // kept re-issuing the same call until the loop detector fired.
+                    'message' => $result->errorMessage
+                        . ' This decision is final and will not change on retry — do NOT'
+                        . ' call this tool again with these arguments. Tell the user plainly'
+                        . ' what you could not do, and continue with what you can.',
                 ]
             ];
         }
@@ -1590,6 +1606,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         $truncated = $result;
         $wasTruncated = false;
+        // Populated by the object branch; reported to both the model and the log.
+        $droppedKeys = [];
 
         // Handle arrays - truncate items
         if (is_array($result) && array_is_list($result)) {
@@ -1632,8 +1650,10 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 // Reserve room for the truncation metadata below. It used to be a
                 // one-line message that fit in 200; the explanatory version plus
                 // _dropped_keys needs more, and overshooting $maxChars would defeat
-                // the point of the cap.
-                if ($currentSize + $itemSize > $maxChars - 700) {
+                // the point of the cap. Clamped to a quarter of the budget so a
+                // small $maxChars can't push the threshold negative — that would
+                // break on the FIRST key and return metadata with no data at all.
+                if ($currentSize + $itemSize > $maxChars - min(700, intdiv($maxChars, 4))) {
                     $wasTruncated = true;
                     break;
                 }
@@ -1652,6 +1672,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 // gone and that retrying won't help is what breaks that cycle.
                 $droppedKeys = array_values(array_diff(array_keys($result), array_keys($truncated)));
                 $truncated['_truncated'] = true;
+                // NOTE: assigning the meta keys below does not disturb $droppedKeys —
+                // array_diff only subtracts, and these keys aren't in $result.
                 $truncated['_dropped_keys'] = $droppedKeys;
                 $truncated['_message'] = "Result truncated to fit token budget. "
                     . "These keys were REMOVED and are NOT available: " . implode(', ', $droppedKeys) . ". "
@@ -1676,10 +1698,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // got a response with `records` quietly gone — and looped asking for it again.
         // The dropped key names are the whole diagnostic.
         //
-        // PHI-safe: key NAMES and byte counts only, never values.
-        $droppedKeys = (is_array($result) && is_array($truncated) && !array_is_list($result))
-            ? array_values(array_diff(array_keys($result), array_keys($truncated)))
-            : [];
+        // PHI-safe: key NAMES and byte counts only, never values. $droppedKeys is
+        // set by the object branch (the only shape where whole keys disappear); it
+        // stays empty for list/string truncation, where nothing is keyed.
         $this->emDebug("TOOL RESULT TRUNCATED", [
             'shape'          => is_array($result)
                 ? (array_is_list($result) ? 'list' : 'object')
