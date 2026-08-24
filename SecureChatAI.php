@@ -1243,7 +1243,27 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
 
         if (!$toolConfig) {
-            return $this->agentError("UNKNOWN_TOOL", "Tool '{$tool_name}' not registered");
+            // NON-FATAL (changed 2026-08-24). This used to return agentError(), which sets
+            // error=true and makes runAgentLoop() abort the whole turn — the user lost the
+            // answer to everything else they asked and got a generic "I don't have access to
+            // that capability" instead. A model asking for a tool that isn't registered is a
+            // recoverable mistake, not a system failure, so feed it back the same way
+            // MISSING_PARAMETERS and hook denials are handled below and let the agent adapt
+            // in-turn. Matters whenever a tool exists in an EM's router but not its
+            // tools.json manifest (records.aggregate, projects.search), or was deliberately
+            // withdrawn (records.save, page.fill — write-disabled 2026-08-24).
+            // Repeat calls are bounded by tool-loop detection plus max_steps/max_tools.
+            $this->emDebug("UNKNOWN_TOOL (non-fatal)", ['tool' => $tool_name]);
+            return [
+                'error'  => false,
+                'type'   => 'UNKNOWN_TOOL',
+                'result' => [
+                    'status'  => 'unavailable',
+                    'message' => "Tool '{$tool_name}' is not available and does not exist. "
+                        . "Do not call it again. Use only the tools you were given; if none of "
+                        . "them can do what the user asked, say so plainly and stop.",
+                ],
+            ];
         }
 
         // Wrap config as typed tool
