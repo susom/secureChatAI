@@ -1698,11 +1698,26 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 // NOTE: assigning the meta keys below does not disturb $droppedKeys —
                 // array_diff only subtracts, and these keys aren't in $result.
                 $truncated['_dropped_keys'] = $droppedKeys;
+                // The remedy has to be one that CAN work. The previous version
+                // said "do not retry" and then "request fewer records via
+                // limit" — and the model, reasonably, did the actionable half.
+                // Observed in prod 2026-08-24: limit 500 -> 100 -> 100 -> 200
+                // -> 100 across 8 steps before the step cap killed the turn.
+                // Lowering the record count cannot help when the overflow is
+                // driven by per-record WIDTH (a 141-option checkbox is ~1.3KB
+                // per record, so ~6 records fit in 8000 chars whatever the
+                // limit says). Narrowing FIELDS is the remedy that works.
+                $overflow = $maxChars > 0 ? round($originalSize / $maxChars, 1) : 0;
                 $truncated['_message'] = "Result truncated to fit token budget. "
                     . "These keys were REMOVED and are NOT available: " . implode(', ', $droppedKeys) . ". "
-                    . "Requesting them again will produce the same truncation — do not retry. "
-                    . "Answer from the keys you did receive, or narrow the query (add a "
-                    . "filter, or request fewer records via limit) so the result fits.";
+                    . "The full result was {$originalSize} chars against a budget of {$maxChars} "
+                    . "({$overflow}x over). Re-requesting the same keys returns the same truncation — "
+                    . "do NOT retry, and do NOT retry with a smaller record limit: when a result is "
+                    . "this far over budget the cause is usually how WIDE each record is, not how many "
+                    . "there are, so a smaller limit truncates identically. What does work: answer from "
+                    . "the keys you did receive; or ask for fewer FIELDS; or ask a question that returns "
+                    . "a single value instead of rows. If you cannot answer from what you received, say "
+                    . "so plainly and tell the user what you would need — do not keep calling tools.";
             }
         }
         // Handle strings - simple truncation
