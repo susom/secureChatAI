@@ -34,6 +34,31 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 {
     use emLoggerTrait;
 
+    /**
+     * Models that support the json_schema response format, in PREFERENCE ORDER.
+     *
+     * Two consumers, and only one of them cares about the order:
+     *   - filterDefaultParamsForModel(): membership test only (order irrelevant)
+     *   - runAgentLoop(): takes the FIRST entry present in api-settings as the
+     *     fallback when the requested model can't do schemas. Whatever sits at the
+     *     front is what every agent-mode turn silently runs on.
+     *
+     * gpt-4-1 used to be first, so it was always the pick — dated, and the lowest
+     * Azure quota of the group (1000/2000 vs gpt-5-4's 1500/3000). Ordering is now
+     * newest full models, then older full models, then reasoning models, with the
+     * nanos last: cheapest quota but weakest at the multi-step tool reasoning agent
+     * mode depends on.
+     *
+     * Was duplicated as a local in both methods; a capability list that drifts
+     * between copies is a silent "Unsupported model" mid-loop, so it lives here.
+     */
+    private const SCHEMA_CAPABLE_MODELS = [
+        'gpt-5-4', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra', 'gpt-5',
+        'gpt-4-1',
+        'o3', 'o4-mini', 'o1', 'o3-mini',
+        'gpt-5-4-nano', 'gpt-4-1-nano',
+    ];
+
     private array $defaultParams;
     private $guzzleClient = null;
     private $guzzleTimeout = 5.0;
@@ -397,8 +422,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         }
 
         // Only models supporting json_schema
-        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra', 'o1', 'o3', 'o3-mini', 'o4-mini'];
-        if (!in_array($model, $schemaModels)) {
+        if (!in_array($model, self::SCHEMA_CAPABLE_MODELS, true)) {
             unset($merged['json_schema']);
         }
 
@@ -891,11 +915,10 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // silently switch to an alias that isn't in $this->modelConfig (which
         // would throw "Unsupported model" mid-loop and surface as a generic
         // "network difficulties" error to the user).
-        $schemaModels = ['gpt-4-1', 'gpt-4-1-nano', 'gpt-5', 'gpt-5-4', 'gpt-5-4-nano', 'gpt-5-6-sol', 'gpt-5-6-luna', 'gpt-5-6-terra', 'o1', 'o3', 'o3-mini', 'o4-mini'];
-        if (!in_array($model, $schemaModels)) {
+        if (!in_array($model, self::SCHEMA_CAPABLE_MODELS, true)) {
             $configured = array_keys($this->modelConfig);
             $fallback = null;
-            foreach ($schemaModels as $candidate) {
+            foreach (self::SCHEMA_CAPABLE_MODELS as $candidate) {
                 if (in_array($candidate, $configured, true)) {
                     $fallback = $candidate;
                     break;
@@ -903,7 +926,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             }
             if ($fallback === null) {
                 throw new \Exception(
-                    "Agent mode requires a schema-capable model but none of [" . implode(', ', $schemaModels)
+                    "Agent mode requires a schema-capable model but none of [" . implode(', ', self::SCHEMA_CAPABLE_MODELS)
                     . "] are configured in SecureChatAI's api-settings. Add one, or disable agent mode for this project."
                 );
             }
@@ -943,6 +966,11 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $step = 0;
         $tools_called = 0;
         $tool_call_history = []; // Track tool calls to detect loops
+        // PHI-safe parallel to $tool_call_history for logging. The real signatures
+        // embed json_encode($arguments), which can carry record data and filter
+        // literals ([first_name]='Smith') — never loggable. These carry the SHAPE
+        // only: tool name + sorted argument key names.
+        $tool_call_shapes = [];
         $tools_used = []; // Track tools used for UI display
 
         // Inject router system prompt + tool catalog
@@ -1087,12 +1115,40 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 // Detect tool ping-pong loops (same tool+args called repeatedly)
                 $callSignature = $tool_name . ':' . json_encode($arguments);
                 $tool_call_history[] = $callSignature;
+                $argKeys = is_array($arguments) ? array_keys($arguments) : [];
+                sort($argKeys);
+                // Flag the OUTCOME, not just the call. A tool that returns
+                // {error:true,...} is the usual reason a model retries and loops, and
+                // that error lives in the RESULT payload — $execution['error'] is
+                // always false here, since line 1057 returns early on a hard failure.
+                // Hook denials surface as result.status='denied' with error=false.
+                $outcome = '';
+                if (is_array($execution['result'] ?? null)) {
+                    if (!empty($execution['result']['error'])) {
+                        $outcome = ' [ERR]';
+                    } elseif (($execution['result']['status'] ?? '') === 'denied') {
+                        $outcome = ' [DENIED]';
+                    }
+                }
+                $tool_call_shapes[] = $tool_name . '(' . implode(',', $argKeys) . ')' . $outcome;
 
                 // Check for loops: same signature appearing 3+ times in last 5 calls
                 if (count($tool_call_history) >= 5) {
                     $recentCalls = array_slice($tool_call_history, -5);
                     $signatureCounts = array_count_values($recentCalls);
                     if (max($signatureCounts) >= 3) {
+                        // Log the whole 5-call window, not just a repeat count. Seeing
+                        // the SEQUENCE is what makes these diagnosable — e.g. "call 1
+                        // errored, so the model re-queried, then repeated the same
+                        // paging call" reads very differently from "called X 3 times".
+                        // PHI-safe: shapes only (see $tool_call_shapes above).
+                        $this->emDebug("TOOL_LOOP_DETECTED — breaking agent loop", [
+                            'step'          => $step,
+                            'tools_called'  => $tools_called,
+                            'elapsed_sec'   => time() - $start_time,
+                            'repeat_count'  => max($signatureCounts),
+                            'recent_shapes' => array_slice($tool_call_shapes, -5),
+                        ]);
                         return $this->agentError(
                             "TOOL_LOOP_DETECTED",
                             "Agent is repeatedly calling the same tool. Breaking loop to prevent infinite execution."
@@ -1300,11 +1356,27 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             str_contains($result->errorMessage ?? '', 'denied by hook') ||
             str_contains($result->errorMessage ?? '', 'Blocked by')
         )) {
+            // Denials were previously invisible in the EM log — hooks report via
+            // error_log(), which lands in php_errors.log with no request id, so a
+            // denied turn could not be correlated with the rest of the trace. Log it
+            // here, where we still have the request context.
+            // PHI-safe: tool name plus a developer-authored hook message.
+            $this->emDebug("TOOL DENIED BY HOOK", [
+                'tool'    => $tool_name,
+                'message' => $result->errorMessage,
+            ]);
             return [
                 'error'  => false,
                 'result' => [
                     'status'  => 'denied',
-                    'message' => $result->errorMessage,
+                    // A denial is TERMINAL — a hook is deterministic, so the identical
+                    // call denies identically. Saying so is what stops the retry loop:
+                    // page.highlight was denied 5x in a row on PID 70 and the model
+                    // kept re-issuing the same call until the loop detector fired.
+                    'message' => $result->errorMessage
+                        . ' This decision is final and will not change on retry — do NOT'
+                        . ' call this tool again with these arguments. Tell the user plainly'
+                        . ' what you could not do, and continue with what you can.',
                 ]
             ];
         }
@@ -1408,6 +1480,21 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     private function agentError(string $type, string $message): array
     {
+        // Log EVERY agent abort here rather than at the ~10 call sites. The user only
+        // ever sees a deliberately vague apology (see the AGENT_ERROR_MESSAGES map),
+        // so without this the log showed nothing but AGENT STEP lines stopping dead —
+        // there was no way to answer "why did Cappy give up?" after the fact.
+        //
+        // PHI-safe: $type is a fixed constant and $message is a developer-authored
+        // diagnostic. Neither carries record data. Callers that have richer context
+        // (the loop detector, the tool-limit checks) log it themselves just before
+        // calling, so this stays the backstop rather than the whole story.
+        //
+        // Sub-agent aborts land here too and look identical to top-level ones; the
+        // $type is enough to tell them apart in practice (MAX_DEPTH_EXCEEDED,
+        // SUBAGENTS_DISABLED and MISSING_PROMPT only come from the spawn path).
+        $this->emDebug("AGENT ABORT [{$type}]", ['message' => $message]);
+
         return [
             'error' => true,
             'type' => $type,
@@ -1542,6 +1629,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         $truncated = $result;
         $wasTruncated = false;
+        // Populated by the object branch; reported to both the model and the log.
+        $droppedKeys = [];
 
         // Handle arrays - truncate items
         if (is_array($result) && array_is_list($result)) {
@@ -1581,7 +1670,13 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 $valueJson = json_encode($value, JSON_UNESCAPED_UNICODE);
                 $itemSize = strlen($key) + strlen($valueJson) + 4; // key + value + quotes/colon
 
-                if ($currentSize + $itemSize > $maxChars - 200) {
+                // Reserve room for the truncation metadata below. It used to be a
+                // one-line message that fit in 200; the explanatory version plus
+                // _dropped_keys needs more, and overshooting $maxChars would defeat
+                // the point of the cap. Clamped to a quarter of the budget so a
+                // small $maxChars can't push the threshold negative — that would
+                // break on the FIRST key and return metadata with no data at all.
+                if ($currentSize + $itemSize > $maxChars - min(700, intdiv($maxChars, 4))) {
                     $wasTruncated = true;
                     break;
                 }
@@ -1591,8 +1686,38 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             }
 
             if ($wasTruncated) {
+                // Name the dropped keys FOR THE MODEL, not just for our log. The old
+                // message said only "truncated to fit token budget", so a model that
+                // asked for a specific key (records.search + include_records=true)
+                // received a response with that key silently absent, no indication it
+                // had ever existed, and a tool `note` telling it to ask again — so it
+                // did, until the loop detector killed the turn. Telling it what is
+                // gone and that retrying won't help is what breaks that cycle.
+                $droppedKeys = array_values(array_diff(array_keys($result), array_keys($truncated)));
                 $truncated['_truncated'] = true;
-                $truncated['_message'] = "Result truncated to fit token budget.";
+                // NOTE: assigning the meta keys below does not disturb $droppedKeys —
+                // array_diff only subtracts, and these keys aren't in $result.
+                $truncated['_dropped_keys'] = $droppedKeys;
+                // The remedy has to be one that CAN work. The previous version
+                // said "do not retry" and then "request fewer records via
+                // limit" — and the model, reasonably, did the actionable half.
+                // Observed in prod 2026-08-24: limit 500 -> 100 -> 100 -> 200
+                // -> 100 across 8 steps before the step cap killed the turn.
+                // Lowering the record count cannot help when the overflow is
+                // driven by per-record WIDTH (a 141-option checkbox is ~1.3KB
+                // per record, so ~6 records fit in 8000 chars whatever the
+                // limit says). Narrowing FIELDS is the remedy that works.
+                $overflow = $maxChars > 0 ? round($originalSize / $maxChars, 1) : 0;
+                $truncated['_message'] = "Result truncated to fit token budget. "
+                    . "These keys were REMOVED and are NOT available: " . implode(', ', $droppedKeys) . ". "
+                    . "The full result was {$originalSize} chars against a budget of {$maxChars} "
+                    . "({$overflow}x over). Re-requesting the same keys returns the same truncation — "
+                    . "do NOT retry, and do NOT retry with a smaller record limit: when a result is "
+                    . "this far over budget the cause is usually how WIDE each record is, not how many "
+                    . "there are, so a smaller limit truncates identically. What does work: answer from "
+                    . "the keys you did receive; or ask for fewer FIELDS; or ask a question that returns "
+                    . "a single value instead of rows. If you cannot answer from what you received, say "
+                    . "so plainly and tell the user what you would need — do not keep calling tools.";
             }
         }
         // Handle strings - simple truncation
@@ -1600,6 +1725,28 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             $truncated = substr($result, 0, $maxChars - 100);
             $truncated .= "\n\n[... truncated " . ($originalSize - strlen($truncated)) . " characters to fit token budget]";
         }
+
+        // Never truncate silently. Reaching this line means we're over the cap (the
+        // under-limit case returned early), so log unconditionally — that covers all
+        // three branches above and any added later.
+        //
+        // This blind spot hid a real bug: records.search puts its (potentially huge)
+        // `records` payload in the LAST key, the object branch above stops at the first
+        // key that doesn't fit, so a model that explicitly passed include_records=true
+        // got a response with `records` quietly gone — and looped asking for it again.
+        // The dropped key names are the whole diagnostic.
+        //
+        // PHI-safe: key NAMES and byte counts only, never values. $droppedKeys is
+        // set by the object branch (the only shape where whole keys disappear); it
+        // stays empty for list/string truncation, where nothing is keyed.
+        $this->emDebug("TOOL RESULT TRUNCATED", [
+            'shape'          => is_array($result)
+                ? (array_is_list($result) ? 'list' : 'object')
+                : gettype($result),
+            'original_chars' => $originalSize,
+            'max_chars'      => $maxChars,
+            'dropped_keys'   => $droppedKeys,
+        ]);
 
         return $truncated;
     }

@@ -122,6 +122,12 @@
             "default": "120"
         },
         {
+            "key": "agent_max_tool_result_chars",
+            "name": "<b>Agent: Max Tool Result Size (characters)</b><br><i>Per tool result. Oversized results are truncated by dropping trailing keys, and the model is told which keys were removed. Applies to EVERY tool call, so the real ceiling is this value multiplied by Max Tool Calls Per Run — raising it a lot can push a long turn past the model's context window. Default 8000.</i>",
+            "type": "text",
+            "default": "8000"
+        },
+        {
             "key": "agent_max_subagent_depth",
             "name": "<b>Agent: Max Sub-Agent Depth</b><br><i>How deep sub-agents can spawn children. 0 = disable sub-agents, 1 = one level, 2 = sub-agents can spawn children.</i>",
             "type": "text",
