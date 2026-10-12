@@ -425,9 +425,9 @@ Long conversations can be compacted server-side via `runCompaction()`:
 |--------|-------------|
 | `callAI($model, $params, $pid)` | Primary entry point for all model calls |
 | `getToolCatalogForProject($pid)` | Returns all discovered tool definitions for a project |
-| `getAvailableModels()` | Returns list of configured/available models |
+| `getAvailableModels($tokenPolicy = 'standard')` | Returns the model aliases configured under one token policy |
 | `getModelContextWindow($model)` | Returns context window size in tokens |
-| `runCompaction($messages, $model)` | Server-side conversation compaction |
+| `runCompaction($messages, $model, ..., $tokenPolicy, $projectId)` | Server-side conversation compaction |
 
 ---
 
@@ -447,6 +447,14 @@ $params = [
 $response = $em->callAI("gpt-4o", $params, $project_id);
 
 ```
+
+### AI Hub token policy (standard / high-threshold)
+
+Add `'token_policy' => 'high'` to `$params` to send a call to the **high-threshold** model set and key instead
+of the standard one. A project's **Minimum Token Policy** is a floor a call can raise but never lower, there
+is no fallback between the two sets, and a refused call returns `type: TOKEN_POLICY_ERROR` without anything
+being sent. Omitting it keeps today's behavior. Full contract, REST examples and the production rollout steps:
+[docs/token-policy.md](docs/token-policy.md).
 
 ## Response Format (Normalized)
 
@@ -482,6 +490,8 @@ Primary entry point for all model calls.
 - Handles retries
 - Applies model-specific parameter filtering
 - Routes to agent mode if requested
+- Resolves the AI Hub token policy (`$params['token_policy']`, the project minimum, any enclosing call) and
+  refuses with `TOKEN_POLICY_ERROR` rather than fall back; see [docs/token-policy.md](docs/token-policy.md)
 
 ---
 
@@ -608,8 +618,11 @@ SecureChatAI exposes a **REDCap External Module API endpoint** for backend servi
 
 | Action | Description |
 |--------|-------------|
-| `callAI` | Simple prompt → response. Wraps a prompt into messages and calls the LLM (no agent mode). |
-| `messages` | Claude Messages API-compatible endpoint. Accepts `{model, messages, max_tokens, temperature, system, top_p, stop}`. Returns Claude-format response. |
+| `callAI` | Simple prompt → response. Wraps a prompt into messages and calls the LLM (no agent mode). Optional `token_policy` (`standard` / `high`); the response includes the `token_policy` that served it. |
+| `messages` | Claude Messages API-compatible endpoint. Accepts `{model, messages, max_tokens, temperature, system, top_p, stop, token_policy}`. Returns Claude-format response. |
+
+Both actions refuse with HTTP 400 when `token_policy` is below the API token's project minimum, unknown, or the
+model isn't configured under it (see [docs/token-policy.md](docs/token-policy.md#rest-api-contentexternalmoduleprefixsecure_chat_ai)).
 | `getSession` | Rehydrate a conversation session. Accepts `{session_id, project_id}`. Returns full session with messages and metadata. |
 
 ### Example: `callAI` via cURL
@@ -644,11 +657,16 @@ All settings are configured via REDCap's External Modules system settings page.
 
 ### System Settings
 
+**AI Hub Tokens:**
+- `aihub-token-standard` — subscription key for the standard models
+- `aihub-token-high-threshold` — subscription key for the high-threshold models
+
 **Model Registry** (repeating sub-settings under `api-settings`):
 - `model-alias` — Internal alias used in `callAI()` (e.g., `gpt-4o`, `claude`, `deepseek`)
 - `model-id` — Provider's model ID or deployment name
 - `api-url` — Full endpoint URL (model/deployment ID baked into the URL for AIHub)
-- `api-token` — API key or subscription key
+- `token-policy` — `standard` (default) or `high`: which model set the row belongs to and which system token it uses
+- `api-token` — optional override; empty uses the system token for the row's policy
 - `api-key-var` — Auth header name (use `api-key` for AI Hub)
 - `api-input-var` — Input variable name for the request body
 - `default-model` — Checkbox to set this entry as the default model
@@ -682,6 +700,7 @@ All settings are configured via REDCap's External Modules system settings page.
 
 ### Project Settings
 
+- `token-policy-default` — Minimum Token Policy (super users only). `high` keeps all of this project's calls on high-threshold models
 - `project_agent_tool_em_prefixes` — Project-level override for which tool EM prefixes are available (takes priority over system setting)
 - `project_pre_tool_use_hooks` / `project_post_tool_use_hooks` — Project-level hook overrides (merge with system hooks)
 - `enable-project-usage` — Enable/disable SecureChatAI for this project

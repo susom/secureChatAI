@@ -27,3 +27,4 @@
 .cappyignore
 CAPPY.md
 logs/
+tests/e2e/shots/

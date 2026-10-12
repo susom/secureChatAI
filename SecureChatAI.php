@@ -23,6 +23,7 @@ require_once "classes/HookResult.php";
 require_once "classes/ProjectAccessPreHook.php";
 require_once "classes/JsonConfigToolAdapter.php";
 require_once "classes/ToolPipeline.php";
+require_once "classes/TokenPolicy.php";
 
 require_once __DIR__ . '/vendor/autoload.php';
 
@@ -62,7 +63,15 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     private array $defaultParams;
     private $guzzleClient = null;
     private $guzzleTimeout = 5.0;
+    /** [token policy => [model alias => config]], see TokenPolicy::buildRegistry() */
     private array $modelConfig = [];
+    /**
+     * Policy of the callAI() currently executing on this instance, or null.
+     * getModuleInstance() hands every caller in a request the same instance, so
+     * a nested callAI() (e.g. a tool EM calling back during an agent loop) uses
+     * this as its minimum and can never drop below the enclosing call's policy.
+     */
+    private ?string $activeTokenPolicy = null;
     private bool $initialized = false;
     private ?EncoderProvider $encoderProvider = null;
 
@@ -86,20 +95,20 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             'model' => 'gpt-4o'
         ];
 
-        // Initialize the model configurations from system settings
-        $apiSettings = $this->framework->getSubSettings('api-settings');
-        foreach ($apiSettings as $setting) {
-            $modelAlias = trim($setting['model-alias'] ?? '');
-            $modelID = trim($setting['model-id'] ?? '');
-            $this->modelConfig[$modelAlias] = [
-                'api_url' => trim($setting['api-url'] ?? ''),
-                'api_token' => trim($setting['api-token'] ?? ''),
-                'api_key_var' => trim($setting['api-key-var'] ?? ''),
-                'required' => $setting['api-input-var'],
-                'model_id' => $modelID
-            ];
-            if (isset($setting['default-model']) && $setting['default-model']) {
-                $this->defaultParams['model'] = $modelAlias;
+        // Initialize the model configurations from system settings, keyed by
+        // token policy then alias. Each row's token is resolved here (row
+        // override, else the system token for the row's policy) and never
+        // changed per call.
+        $this->modelConfig = TokenPolicy::buildRegistry(
+            $this->framework->getSubSettings('api-settings') ?: [],
+            (string)($this->getSystemSetting('aihub-token-standard') ?? ''),
+            (string)($this->getSystemSetting('aihub-token-high-threshold') ?? '')
+        );
+        foreach ($this->modelConfig as $configs) {
+            foreach ($configs as $modelAlias => $config) {
+                if ($config['is_default']) {
+                    $this->defaultParams['model'] = $modelAlias;
+                }
             }
         }
 
@@ -402,14 +411,14 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         ];
     }
 
-    private function filterDefaultParamsForModel($model, $params)
+    private function filterDefaultParamsForModel($model, $params, ?string $modelId = null)
     {
         // Embedding models don't use chat defaultParams
         if ($model === 'ada-002' || $model === 'text-embedding-3-small' || $model === 'text-embedding-3-large') {
             $embedParams = array_merge([
-                'model' => $this->modelConfig[$model]['model_id'] ?? $model
+                'model' => $modelId ?: $model
             ], $params);
-            unset($embedParams['session_id'], $embedParams['agent_mode'], $embedParams['project_id'], $embedParams['log_turn']);
+            unset($embedParams['session_id'], $embedParams['agent_mode'], $embedParams['project_id'], $embedParams['log_turn'], $embedParams['token_policy']);
             return $embedParams;
         }
 
@@ -448,12 +457,133 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         unset($merged['max_tokens']);
 
         // Strip internal/meta params that are not part of the API contract
-        unset($merged['session_id'], $merged['agent_mode'], $merged['project_id'], $merged['log_turn']);
+        unset($merged['session_id'], $merged['agent_mode'], $merged['project_id'], $merged['log_turn'], $merged['token_policy']);
 
         return $merged;
     }
 
+    /**
+     * Call a model.
+     *
+     * `$params['token_policy']` ('standard' | 'high', optional) picks which set of
+     * AI Hub models — and which subscription key — serves the call. The call runs
+     * under the stricter of: that value, the project's `token-policy-default`,
+     * and the policy of any callAI() already executing on this instance. Asking
+     * for less than that minimum, or for a model alias that is not configured
+     * under the resolved policy, returns a TOKEN_POLICY_ERROR response; there is
+     * no fallback to the other set of models. Omitted = the minimum, which is
+     * 'standard' for a project with no default, so existing callers are unchanged.
+     */
     public function callAI($model, $params = [], $project_id = null, $username = null)
+    {
+        $this->initSecureChatAI();
+        $params = is_array($params) ? $params : [];
+
+        try {
+            $tokenPolicy = $this->resolveTokenPolicy($params['token_policy'] ?? null, $project_id);
+        } catch (TokenPolicyException $e) {
+            // Don't log a value we couldn't parse; the reason is in the message.
+            unset($params['token_policy']);
+            return $this->tokenPolicyError($model, $params, $project_id, $username, $e);
+        }
+        $params['token_policy'] = $tokenPolicy;
+
+        $outerPolicy = $this->activeTokenPolicy;
+        $this->activeTokenPolicy = $tokenPolicy;
+        try {
+            return $this->callAIUnderPolicy($model, $params, $project_id, $username);
+        } finally {
+            $this->activeTokenPolicy = $outerPolicy;
+        }
+    }
+
+    /**
+     * The minimum policy for a call: the project's default (if any) and the
+     * policy of an enclosing callAI(), whichever is stricter.
+     */
+    private function minimumTokenPolicy(?int $project_id): string
+    {
+        $minimum = $this->activeTokenPolicy ?? TokenPolicy::STANDARD;
+        if ($project_id) {
+            try {
+                $projectDefault = TokenPolicy::normalize($this->getProjectSetting('token-policy-default', $project_id));
+            } catch (TokenPolicyException $e) {
+                // A stored value we don't recognize: fail closed.
+                $projectDefault = TokenPolicy::HIGH;
+            }
+            $minimum = TokenPolicy::stricter($minimum, $projectDefault ?? TokenPolicy::STANDARD);
+        }
+        return $minimum;
+    }
+
+    /**
+     * @throws TokenPolicyException
+     */
+    private function resolveTokenPolicy($requested, $project_id): string
+    {
+        $project_id = $project_id ? (int)$project_id : null;
+        return TokenPolicy::resolve(TokenPolicy::normalize($requested), $this->minimumTokenPolicy($project_id));
+    }
+
+    /**
+     * The config for a model alias under a policy. Never falls back to the
+     * other policy's models.
+     *
+     * @throws TokenPolicyException when the alias exists only under the other policy
+     * @throws Exception 'Unsupported model' when no policy has it (unchanged behavior)
+     */
+    private function getModelConfigFor(string $model, string $tokenPolicy): array
+    {
+        if (isset($this->modelConfig[$tokenPolicy][$model])) {
+            return $this->modelConfig[$tokenPolicy][$model];
+        }
+        $elsewhere = [];
+        foreach ($this->modelConfig as $policy => $configs) {
+            if ($policy !== $tokenPolicy && isset($configs[$model])) {
+                $elsewhere[] = $policy;
+            }
+        }
+        if (!$elsewhere) {
+            throw new Exception('Unsupported model: ' . $model);
+        }
+        throw new TokenPolicyException(
+            "Model '{$model}' is not configured under the '{$tokenPolicy}' token policy"
+            . " (it exists only under: " . implode(', ', $elsewhere) . ")."
+        );
+    }
+
+    /**
+     * Error response for a call refused by the token policy. Not retried: the
+     * same request would be refused again.
+     */
+    private function tokenPolicyError($model, array $params, $project_id, $username, TokenPolicyException $e): array
+    {
+        $error = [
+            'error'   => true,
+            'type'    => 'TOKEN_POLICY_ERROR',
+            'message' => $e->getMessage(),
+        ];
+        // The message holds aliases and policy names only, never prompt content.
+        $this->emDebug("Token policy refused call", [
+            'model'   => $model,
+            'pid'     => $project_id,
+            'message' => $e->getMessage(),
+        ]);
+        if ($project_id) {
+            $this->logErrorInteraction($project_id, $params + ['model' => $model], $error);
+        }
+
+        $sanitizedError = $this->sanitizeOutputForUI($error);
+        $turnError = $sanitizedError;
+        if (empty($turnError['model'])) {
+            $turnError['model'] = $model;
+        }
+        $this->logConversationTurn($project_id, $params, $turnError, $username);
+
+        return $sanitizedError;
+    }
+
+    private function callAIUnderPolicy($model, array $params, $project_id = null, $username = null)
     {
         $startTotal = microtime(true);
         $retries = 2;
@@ -528,6 +658,8 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
                 return $sanitizedResponse;
 
+            } catch (TokenPolicyException $e) {
+                return $this->tokenPolicyError($model, $params, $project_id, $username, $e);
             } catch (\Exception $e) {
                 $attempt++;
                 // PHI-safe: log the error description and request metadata only.
@@ -598,12 +730,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     }
 
     /**
-     * Return the list of configured model aliases.
+     * Return the model aliases configured under a token policy.
      */
-    public function getAvailableModels(): array
+    public function getAvailableModels(string $tokenPolicy = TokenPolicy::STANDARD): array
     {
         $this->initSecureChatAI();
-        return array_keys($this->modelConfig);
+        return array_keys($this->modelConfig[$tokenPolicy] ?? []);
     }
 
     /**
@@ -619,13 +751,15 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      *
      * Makes one LLM call (to generate the summary) if compaction triggers.
      */
-    public function runCompaction(array $messages, string $model, int $keepRecent = 6, ?string $summarizeModel = null, ?int $contextWindowOverride = null): array
+    public function runCompaction(array $messages, string $model, int $keepRecent = 6, ?string $summarizeModel = null, ?int $contextWindowOverride = null, ?string $tokenPolicy = null, ?int $projectId = null): array
     {
         $params = [
             'messages'             => $messages,
             'compact_if_needed'    => true,
             'compact_keep_recent'  => $keepRecent,
             'compact_model'        => $summarizeModel ?? $model,
+            // Throws TokenPolicyException for a policy below the project minimum.
+            'token_policy'         => $this->resolveTokenPolicy($tokenPolicy, $projectId),
         ];
 
         $beforeCount = count($messages);
@@ -915,8 +1049,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         // silently switch to an alias that isn't in $this->modelConfig (which
         // would throw "Unsupported model" mid-loop and surface as a generic
         // "network difficulties" error to the user).
+        $tokenPolicy = $params['token_policy'] ?? $this->activeTokenPolicy ?? TokenPolicy::STANDARD;
         if (!in_array($model, self::SCHEMA_CAPABLE_MODELS, true)) {
-            $configured = array_keys($this->modelConfig);
+            $configured = array_keys($this->modelConfig[$tokenPolicy] ?? []);
             $fallback = null;
             foreach (self::SCHEMA_CAPABLE_MODELS as $candidate) {
                 if (in_array($candidate, $configured, true)) {
@@ -927,7 +1062,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             if ($fallback === null) {
                 throw new \Exception(
                     "Agent mode requires a schema-capable model but none of [" . implode(', ', self::SCHEMA_CAPABLE_MODELS)
-                    . "] are configured in SecureChatAI's api-settings. Add one, or disable agent mode for this project."
+                    . "] are configured in SecureChatAI's api-settings under the '{$tokenPolicy}' token policy. Add one, or disable agent mode for this project."
                 );
             }
             $this->emDebug("Agent mode requires schema-capable model, switching from {$model} to {$fallback}");
@@ -1210,11 +1345,16 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     {
         $this->initSecureChatAI();
 
-        if (!isset($this->modelConfig[$model])) {
-            throw new Exception('Unsupported model: ' . $model);
-        }
+        // Every internal path (agent loop, sub-agents, compaction) lands here, so
+        // this is where the policy picks the model set. It never reaches the
+        // provider: unknown params can 400 on Azure/Bedrock.
+        $tokenPolicy = TokenPolicy::resolve(
+            TokenPolicy::normalize($params['token_policy'] ?? null),
+            $this->activeTokenPolicy ?? TokenPolicy::STANDARD
+        );
+        unset($params['token_policy']);
 
-        $modelConfig = $this->modelConfig[$model];
+        $modelConfig = $this->getModelConfigFor($model, $tokenPolicy);
         $api_endpoint = $modelConfig['api_url'];
 
         foreach ($modelConfig['required'] as $param) {
@@ -1223,7 +1363,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             }
         }
 
-        $filteredParams = $this->filterDefaultParamsForModel($model, $params);
+        $filteredParams = $this->filterDefaultParamsForModel($model, $params, $modelConfig['model_id']);
 
         [$paramName, $dynamicMax, $promptTokens] = $this->computeDynamicMaxTokens($model, $fullPrompt ?? $filteredParams['messages'][0]['content'] ?? '');
         $filteredParams[$paramName] = (int)$dynamicMax;
@@ -1252,7 +1392,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
         } else {
             // OpenAI-compatible chat models (Azure AI Foundry, Vertex AI, Llama, etc.)
-            $filteredParams = $this->filterDefaultParamsForModel($model, $params);
+            $filteredParams = $this->filterDefaultParamsForModel($model, $params, $modelConfig['model_id']);
             $generic = new GenericModelRequest($this, $modelConfig, [], $model);
             $responseData = $generic->sendRequest($api_endpoint, $filteredParams);
             // PHI-safe: log only response metadata (token usage, model, shape) — never the
@@ -1263,7 +1403,7 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $normalizedResponse = $this->normalizeResponse($responseData, $model);
 
         if ($project_id) {
-            $this->logInteraction($project_id, $params, $responseData, $username);
+            $this->logInteraction($project_id, $params + ['token_policy' => $tokenPolicy], $responseData, $username);
         }
 
         return $normalizedResponse;
@@ -1575,10 +1715,12 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             ['role' => 'user', 'content' => $prompt]
         ];
 
-        // Reduced limits for sub-agents
+        // Reduced limits for sub-agents. A sub-agent runs under its parent's
+        // token policy; it only ever runs inside the parent's callAI().
         $params = [
             'messages' => $messages,
             'max_tokens' => 4000,
+            'token_policy' => $this->activeTokenPolicy ?? TokenPolicy::STANDARD,
         ];
 
         // Run child agent loop
@@ -1784,6 +1926,18 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
             $type = $response['type'] ?? 'UNKNOWN_ERROR';
             $msg = $response['message'] ?? 'An error occurred';
 
+            // A token-policy refusal is a caller/config error the calling EM must
+            // be able to detect, so it keeps its error flag, type and reason.
+            if ($type === 'TOKEN_POLICY_ERROR') {
+                return [
+                    'role'    => 'assistant',
+                    'content' => "This request was not sent: it is not allowed under the AI token policy. Please contact your administrator.",
+                    'error'   => true,
+                    'type'    => $type,
+                    'message' => $msg,
+                ];
+            }
+
             $friendlyMessages = [
                 'TIMEOUT' => "I apologize, but that request took longer than expected. Please try again in a moment.",
                 'MAX_TOOLS_EXCEEDED' => "I apologize, but I needed to use too many tools for that request. Could you try simplifying your question?",
@@ -1975,11 +2129,15 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
                 ? 'max_completion_tokens'
                 : 'max_tokens';
 
+            // Same policy as the conversation being summarized. If the summarize
+            // model isn't configured under it, callLLMOnce throws and compaction is
+            // skipped below — the history is never sent to the other model set.
             $summaryResponse = $this->callLLMOnce($summarizeModel, [
                 'messages' => [
                     ['role' => 'user', 'content' => $summaryPrompt]
                 ],
                 $tokenParam => 500,
+                'token_policy' => $params['token_policy'] ?? $this->activeTokenPolicy ?? TokenPolicy::STANDARD,
             ], null);
 
             $summary = trim($summaryResponse['content'] ?? '');
@@ -2483,6 +2641,8 @@ private function toOpenAIToolsShape(array $tools): array
             // user can't rebuild another user's chat from a guessed session_id.
             'username'           => $username !== null ? (string)$username : null,
             'model'              => $responseData['model'] ?? ($requestData['model'] ?? 'unknown'),
+            // Which AI Hub model set served the turn. Never the token itself.
+            'token_policy'       => $requestData['token_policy'] ?? null,
             'timestamp'          => date('Y-m-d H:i:s'),
             'user_message'       => $userMessage,
             'assistant_response' => $assistant,
@@ -2520,6 +2680,7 @@ private function toOpenAIToolsShape(array $tools): array
             // rows predate this, so the usage dashboard shows them as "not logged".
             'username' => $username !== null ? (string)$username : null,
             'model' => $responseData['model'] ?? ($requestData['model'] ?? 'unknown'),
+            'token_policy' => $requestData['token_policy'] ?? null,
             'timestamp' => date('Y-m-d H:i:s')
         ];
 
@@ -2579,6 +2740,7 @@ private function toOpenAIToolsShape(array $tools): array
             'project_id' => $project_id,
             'session_id' => $requestData['session_id'] ?? null,
             'model' => $requestData['model'] ?? 'unknown',
+            'token_policy' => $requestData['token_policy'] ?? null,
             'timestamp' => date('Y-m-d H:i:s'),
             'error' => true,
             'error_type' => $error['type'] ?? 'UNKNOWN',
@@ -2680,7 +2842,33 @@ private function toOpenAIToolsShape(array $tools): array
      * @throws Exception
      */
 
-    public function redcap_module_api($action = null, $payload = [])
+    /**
+     * Config-dialog save validation (system and project): token policy values,
+     * and that every model row ends up with a token.
+     */
+    public function validateSettings($settings)
+    {
+        return TokenPolicy::validateSettings(is_array($settings) ? $settings : []);
+    }
+
+    /**
+     * Error response for the REST actions when the token policy refuses a call.
+     */
+    private function apiTokenPolicyError(string $message, bool $claudeFormat): array
+    {
+        // "error" must be the first key: RestUtility::sendResponse() re-wraps any
+        // non-200 JSON body that doesn't start with {"error" into {"error": "<body>"}.
+        $body = $claudeFormat
+            ? ["error" => ["type" => "token_policy_error", "message" => $message], "type" => "error"]
+            : ["error" => $message, "type" => "TOKEN_POLICY_ERROR"];
+        return [
+            "status"  => 400,
+            "body"    => json_encode($body),
+            "headers" => ["Content-Type" => "application/json"]
+        ];
+    }
+
+    public function redcap_module_api($action = null, $payload = [], $api_project_id = null)
     {
         if (empty($action) && isset($_POST['action'])) {
             $action = $_POST['action'];
@@ -2715,6 +2903,14 @@ private function toOpenAIToolsShape(array $tools): array
                     'max_tokens' => $max_tokens
                 ];
 
+                // Resolved against the API token's project so its minimum policy
+                // holds for REST callers too (callAI() below runs without a pid).
+                try {
+                    $params['token_policy'] = $this->resolveTokenPolicy($payload['token_policy'] ?? null, $api_project_id);
+                } catch (TokenPolicyException $e) {
+                    return $this->apiTokenPolicyError($e->getMessage(), false);
+                }
+
                 if ($json_schema !== null) {
                     $decoded = json_decode($json_schema, true);
                     if (json_last_error() === JSON_ERROR_NONE) {
@@ -2724,9 +2920,14 @@ private function toOpenAIToolsShape(array $tools): array
 
                 $result = $this->callAI($model, $params);
 
+                if (($result['type'] ?? null) === 'TOKEN_POLICY_ERROR') {
+                    return $this->apiTokenPolicyError($result['message'] ?? 'Refused by token policy', false);
+                }
+
                 $response = [
                     'status' => 'success',
                     'model' => $model,
+                    'token_policy' => $params['token_policy'],
                     'content' => $this->extractResponseText($result),
                     'usage' => $this->extractUsageTokens($result)
                 ];
@@ -2798,6 +2999,12 @@ private function toOpenAIToolsShape(array $tools): array
                 // Build params for callAI()
                 $params = ['messages' => $messages];
 
+                try {
+                    $params['token_policy'] = $this->resolveTokenPolicy($payload['token_policy'] ?? null, $api_project_id);
+                } catch (TokenPolicyException $e) {
+                    return $this->apiTokenPolicyError($e->getMessage(), true);
+                }
+
                 if ($temperature !== null) $params['temperature'] = $temperature;
                 if ($top_p !== null) $params['top_p'] = $top_p;
                 if ($stop !== null) $params['stop'] = $stop;
@@ -2811,6 +3018,10 @@ private function toOpenAIToolsShape(array $tools): array
 
                 // Call the AI (no project_id for external API calls)
                 $result = $this->callAI($mappedModel, $params, null);
+
+                if (($result['type'] ?? null) === 'TOKEN_POLICY_ERROR') {
+                    return $this->apiTokenPolicyError($result['message'] ?? 'Refused by token policy', true);
+                }
 
                 // Check for errors
                 if (isset($result['error']) && $result['error']) {
