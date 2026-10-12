@@ -131,7 +131,7 @@ This separation ensures:
 > So they are routed with `o1`/`o3-mini`/`o3`/`o4-mini`/`gpt-5` — strict param
 > set, `max_completion_tokens` — and **not** like `gpt-5-4`. Any project-level
 > temperature/top-p/penalty setting is inert for them. Each alias still needs its
-> own `api-settings` row; see `model_settings_prod.txt`.
+> own `api-settings` row in the module's system settings.
 
 ### Embeddings
 - `text-embedding-3-small`, `text-embedding-3-large`
