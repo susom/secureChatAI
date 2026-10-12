@@ -12,7 +12,12 @@ $init->invoke($module);
 
 $configProp = $reflect->getProperty('modelConfig');
 $configProp->setAccessible(true);
-$modelConfig = $configProp->getValue($module);
+$modelConfig = $configProp->getValue($module); // [token policy => [alias => config]]
+
+// ?policy=standard|high runs one model set; anything else runs both.
+$policyFilter = in_array($_GET['policy'] ?? '', [TokenPolicy::STANDARD, TokenPolicy::HIGH], true)
+    ? $_GET['policy']
+    : 'all';
 
 // Model type detection
 function detectModelType($alias) {
@@ -23,12 +28,13 @@ function detectModelType($alias) {
 }
 
 // Run test for a single model
-function testModel($module, $alias, $config) {
+function testModel($module, $alias, $config, $policy) {
     $type = detectModelType($alias);
     $startTime = microtime(true);
 
     $result = [
         'alias' => $alias,
+        'policy' => $policy,
         'type' => $type,
         'status' => 'fail',
         'output' => '',
@@ -70,6 +76,7 @@ function testModel($module, $alias, $config) {
                 break;
         }
 
+        $params['token_policy'] = $policy;
         $response = $module->callAI($alias, $params);
         $result['timing'] = round((microtime(true) - $startTime) * 1000, 0); // ms
 
@@ -171,13 +178,13 @@ function testModel($module, $alias, $config) {
 
 // Run all tests
 $results = [];
-foreach ($modelConfig as $alias => $config) {
-    // Skip empty/invalid aliases
-    if (empty(trim($alias))) {
-        $module->emDebug("Skipping empty model alias", $config);
+foreach ($modelConfig as $policy => $configs) {
+    if ($policyFilter !== 'all' && $policy !== $policyFilter) {
         continue;
     }
-    $results[] = testModel($module, $alias, $config);
+    foreach ($configs as $alias => $config) {
+        $results[] = testModel($module, $alias, $config, $policy);
+    }
 }
 
 // Group by type
@@ -219,6 +226,7 @@ $filename = 'securechatai_model_settings_' . date('Ymd_His') . '.json';
             background: #f8f9fa;
             padding: 8px;
             border-radius: 4px;
+            overflow-wrap: break-word;
         }
         .timing-badge {
             font-size: 0.75rem;
@@ -236,6 +244,15 @@ $filename = 'securechatai_model_settings_' . date('Ymd_His') . '.json';
             margin: 20px 0 10px 0;
             border-left: 4px solid #007bff;
             font-weight: bold;
+        }
+        @media (max-width: 767.98px) {
+            /* Phones: let long unbroken output (paths, keys) wrap anywhere so it can't widen the table. */
+            .model-output { overflow-wrap: anywhere; }
+        }
+        .policy-filter {
+            min-height: 44px; /* comfortable tap target on phones */
+            display: inline-flex;
+            align-items: center;
         }
         .summary-card {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -261,11 +278,21 @@ $filename = 'securechatai_model_settings_' . date('Ymd_His') . '.json';
                     <?php endif; ?>
                 </p>
             </div>
-            <div class="col-md-4 text-end">
+            <div class="col-md-4 text-md-end mt-2 mt-md-0">
                 <button onclick="window.location.reload()" class="btn btn-light">
                     ↻ Rerun Tests
                 </button>
             </div>
+        </div>
+        <div class="mt-3" role="group" aria-label="Token policy">
+            <span class="me-2">Token policy:</span>
+            <?php foreach (['all' => 'All', TokenPolicy::STANDARD => 'Standard', TokenPolicy::HIGH => 'High-threshold'] as $value => $label): ?>
+                <?php $url = $module->getUrl('pages/tests.php') . '&policy=' . urlencode($value); ?>
+                <a href="<?= htmlspecialchars($url) ?>"
+                   data-policy="<?= htmlspecialchars($value) ?>"
+                   class="btn policy-filter <?= $policyFilter === $value ? 'btn-light' : 'btn-outline-light' ?> me-1 mb-1"
+                   <?= $policyFilter === $value ? 'aria-current="true"' : '' ?>><?= htmlspecialchars($label) ?></a>
+            <?php endforeach; ?>
         </div>
     </div>
 
@@ -275,14 +302,16 @@ $filename = 'securechatai_model_settings_' . date('Ymd_His') . '.json';
                 <?= strtoupper($type) ?> Models (<?= count($grouped[$type]) ?>)
             </div>
 
-            <table class="table table-bordered table-hover mb-4">
+            <div class="table-responsive mb-4">
+            <table class="table table-bordered table-hover mb-0">
                 <thead class="table-light">
                     <tr>
                         <th style="width: 20%;">Model</th>
+                        <th style="width: 10%;" class="d-none d-md-table-cell">Policy</th>
                         <th style="width: 10%;" class="text-center">Status</th>
-                        <th style="width: 10%;" class="text-center">Timing</th>
-                        <th style="width: 15%;">Tokens</th>
-                        <th style="width: 45%;">Output / Error</th>
+                        <th style="width: 10%;" class="text-center d-none d-md-table-cell">Timing</th>
+                        <th style="width: 15%;" class="d-none d-md-table-cell">Tokens</th>
+                        <th style="width: 35%;">Output / Error</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -290,19 +319,25 @@ $filename = 'securechatai_model_settings_' . date('Ymd_His') . '.json';
                         <tr>
                             <td>
                                 <strong><?= !empty(trim($r['alias'])) ? htmlspecialchars($r['alias']) : '<em class="text-muted">(empty alias)</em>' ?></strong>
+                                <div class="d-md-none mt-1"><?php /* phones: Policy column is hidden */ ?>
+                                    <span class="badge <?= $r['policy'] === TokenPolicy::HIGH ? 'bg-dark' : 'bg-secondary' ?>"><?= $r['policy'] === TokenPolicy::HIGH ? 'high-threshold' : 'standard' ?></span>
+                                </div>
                                 <?php if ($r['error']): ?>
                                     <br><small class="text-danger"><?= htmlspecialchars($r['error']) ?></small>
                                 <?php endif; ?>
+                            </td>
+                            <td class="d-none d-md-table-cell">
+                                <span class="badge <?= $r['policy'] === TokenPolicy::HIGH ? 'bg-dark' : 'bg-secondary' ?>"><?= $r['policy'] === TokenPolicy::HIGH ? 'high-threshold' : 'standard' ?></span>
                             </td>
                             <td class="text-center">
                                 <span class="status-badge <?= $r['status'] ?>">
                                     <?= $r['status'] === 'success' ? '✅' : '❌' ?>
                                 </span>
                             </td>
-                            <td class="text-center">
+                            <td class="text-center d-none d-md-table-cell">
                                 <span class="timing-badge"><?= $r['timing'] ?> ms</span>
                             </td>
-                            <td>
+                            <td class="d-none d-md-table-cell">
                                 <?php if ($r['tokens']): ?>
                                     <div class="token-info">
                                         <?php if (isset($r['tokens']['prompt_tokens'])): ?>
@@ -328,6 +363,7 @@ $filename = 'securechatai_model_settings_' . date('Ymd_His') . '.json';
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         <?php endif; ?>
     <?php endforeach; ?>
 

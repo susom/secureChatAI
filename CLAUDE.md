@@ -35,6 +35,10 @@
 - **8000-char tool-result cap** (`SecureChatAI.php:1343`) drops **trailing** keys — tool EMs must order `preview_markdown`/`note`/`message` before any large `records` payload, and large raw payloads should be opt-in (`include_records`).
 - Tool EMs must never echo `ref_xxx` session-cache handles to end users.
 
+### AI Hub token policy (2026-10, branch feature/token-policy)
+- Two system tokens (`aihub-token-standard`, `aihub-token-high-threshold`), a per-row `token-policy`, and a super-user project minimum (`token-policy-default`). Callers pass `token_policy` in `callAI()` params or the REST payload. It's a data rule: no fallback, and the project minimum is a floor. Logic lives in `classes/TokenPolicy.php`; design, contract and prod rollout are in `docs/token-policy.md`.
+- Any new internal `callLLMOnce()` path must carry `token_policy` (or run inside `callAI()` so `activeTokenPolicy` covers it).
+
 ### Known issues
 - grok-3: "Model service is unavailable" on AI Hub side (not code issue)
 - Gemini access may require explicit subscription activation per product tier

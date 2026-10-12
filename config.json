@@ -146,6 +146,18 @@
             "required": false
         },
         {
+            "key": "aihub-token-standard",
+            "name": "<b>AI Hub Token (standard)</b><br><i>Subscription key for the standard models. Used by every model row set to the <code>standard</code> token policy whose own API Token is empty.</i>",
+            "type": "password",
+            "required": false
+        },
+        {
+            "key": "aihub-token-high-threshold",
+            "name": "<b>AI Hub Token (high-threshold)</b><br><i>Subscription key for the high-threshold models. Used by every model row set to the <code>high</code> token policy whose own API Token is empty. Data sent under the <code>high</code> policy only ever reaches these models.</i>",
+            "type": "password",
+            "required": false
+        },
+        {
             "key": "api-settings",
             "name": "<b>AI Model API Settings</b>",
             "required": true,
@@ -171,10 +183,21 @@
                     "required": true
                 },
                 {
+                    "key": "token-policy",
+                    "name": "<b>Token Policy</b> <i>(which AI Hub token and which callers this model serves)</i>",
+                    "type": "dropdown",
+                    "required": false,
+                    "choices": [
+                        { "value": "standard", "name": "standard" },
+                        { "value": "high", "name": "high-threshold" }
+                    ],
+                    "default": "standard"
+                },
+                {
                     "key": "api-token",
-                    "name": "<b>API Token</b>",
+                    "name": "<b>API Token</b> <i>(optional override; leave empty to use the system token for this row's policy)</i>",
                     "type": "text",
-                    "required": true
+                    "required": false
                 },
                 {
                     "key": "api-key-var",
@@ -337,6 +360,17 @@
         }
     ],
     "project-settings": [
+        {
+            "key": "token-policy-default",
+            "name": "<b>Minimum Token Policy</b><br><i>The AI Hub token policy for every SecureChatAI call made for this project. <code>high-threshold</code> sends this project's data only to high-threshold models; a calling EM can raise a call to <code>high</code> but never lower it below this setting. Empty means <code>standard</code>.</i>",
+            "type": "dropdown",
+            "required": false,
+            "super-users-only": true,
+            "choices": [
+                { "value": "standard", "name": "standard" },
+                { "value": "high", "name": "high-threshold" }
+            ]
+        },
         {
             "key": "project_agent_tool_em_prefixes",
             "name": "<b>Agent Tool EM Prefixes</b><br><i>(optional)</i> Comma-separated EM prefixes that provide agent tools for this project. Overrides the system-level default when set.<br>Example: <code>redcap_agent_record_tools,redcap_agent_rexi_tools</code>",
