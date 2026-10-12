@@ -17,6 +17,8 @@ That rule drives every decision below:
 - A project's **Minimum Token Policy** is a floor. A call can raise it to `high`, never lower it.
 - Every internal call path carries the policy: the agent loop, sub-agents, compaction summaries, and any
   nested `callAI()` a tool EM makes during a call.
+- An agent tool can't pull a `high` project's data into a `standard` conversation (see
+  [Cross-project tool calls](#cross-project-tool-calls)).
 
 ## Configuration
 
@@ -35,8 +37,12 @@ That rule drives every decision below:
 
 ### Project setting (project → External Modules → SecureChatAI → Configure)
 
-- **Minimum Token Policy** `token-policy-default`, super users only. `high-threshold` sends every call made
-  for this project to high-threshold models. Empty means `standard`.
+- **Minimum Token Policy** `token-policy-default`, super users only. Empty means `standard`. Set to
+  `high-threshold`, it does two things:
+  - every call made **for** this project (its `project_id` passed to `callAI()`, or the project of the REST
+    API token) runs on high-threshold models;
+  - an agent tool in **any other** conversation that targets this project (`pid` in the tool arguments) is
+    refused unless that conversation is itself `high`.
 - The project has to have SecureChatAI enabled for the setting to be editable. Calls made without a project
   ID (e.g. RAG's embedding call) only get the per-call value.
 
@@ -97,9 +103,34 @@ Refusals aren't retried. When there's a project they're logged as `SecureChatLog
 An alias that exists under **no** policy (a typo) still fails the way it always has, as "Unsupported model"
 (retried, then a generic error), not as a token-policy refusal.
 
+### Cross-project tool calls
+
+A call's policy comes from the project passed to `callAI()`. For Cappy that is its own config project, not
+the project a tool reads. Without a guard, a standard Cappy conversation could call `records.get` with the
+`pid` of a `high` project and send that project's records to a standard model.
+
+`TokenPolicyPreHook` (always on, next to `ProjectAccessPreHook`) closes that. Before every tool call that
+carries a `pid`, it compares that project's minimum with the conversation's policy. If the project needs
+more, the tool doesn't run. The model gets a terminal denial ("Project N requires the 'high' AI token
+policy, but this conversation runs under 'standard' ...") and tells the user. The conversation is never
+upgraded mid-loop, because that would send the earlier turns to the other set.
+
+Tools only see a project through a `pid` argument (the same convention `ProjectAccessPreHook` relies on).
+A tool EM that reads another project some other way has to check `getProjectMinimumTokenPolicy($pid)`
+itself.
+
+The tool context also carries the conversation's policy: `$context->get('token_policy')`. A tool EM that makes its
+own LLM call **in a separate request** (e.g. a REST-endpoint tool) must pass it along as `token_policy`.
+`activeTokenPolicy` only covers nested calls in the same PHP request.
+
 ### Other entry points
 
-- `getAvailableModels(string $tokenPolicy = 'standard')` returns the aliases configured under one policy.
+- `getAvailableModels(?string $tokenPolicy = null, ?int $projectId = null)` returns the aliases configured
+  under one policy. With no policy, it returns the set a call from `$projectId` (default: the current project
+  context) would get, which is what MICA's `assertModelIsRegistered()` validates against. An unknown policy
+  returns `[]`.
+- `getProjectMinimumTokenPolicy(int $pid)` returns a project's minimum (`standard` when unset; an
+  unrecognized stored value fails closed to `high`).
 - `runCompaction(..., ?string $tokenPolicy = null, ?int $projectId = null)` resolves the policy the same
   way and summarizes on that policy's models only.
 - **Agent mode:** if the requested model can't do JSON schemas, the fallback model is chosen from the
@@ -178,7 +209,7 @@ standard rows never changed, so existing traffic isn't affected.
 | What | Command | Result 2026-10-12 |
 | --- | --- | --- |
 | Unit: `TokenPolicy` (normalize, resolve/minimum, registry, save validation) | `docker exec redcap_2023_1_web php /var/www/html/modules-local/secure_chat_ai_v9.9.9/tests/TokenPolicyTest.php` | 44/44, exit 0 |
-| E2E routing against a mock AI Hub: callAI, project minimum, nested calls, agent loop + sub-agent, compaction, upstream hygiene, logging, both REST actions | `tests/e2e/routing.php` (below) | 36/36, exit 0 |
+| E2E routing against a mock AI Hub: callAI, project minimum, nested calls, agent loop + sub-agent, cross-project tool guard, `getAvailableModels`, compaction, upstream hygiene, logging, both REST actions | `tests/e2e/routing.php` (below) | 44/44, exit 0 |
 | E2E UI (Playwright, desktop 1400×950 + iPhone 13): settings dialog, refused/valid save, project minimum, smoke-test page and its filter | `tests/e2e/token-policy.js` (below) | 40/40, exit 0 |
 
 The E2E tests swap the **local** SecureChatAI system settings for a test configuration whose four model rows
@@ -186,7 +217,12 @@ point at `tests/e2e/mock_aihub.php` with fake keys. The mock runs only under PHP
 web container, records which key and path each request used, and never logs message text.
 `fixture.php setup` backs up the real settings first and refuses to run if a backup already exists;
 `teardown` restores them exactly. It also creates a throwaway admin (`e2e_sca_admin`) with a module-API token
-on PID 270 and enables the module there; teardown removes both.
+on PID 270 and enables the module there. It gives that admin rights on PID 282 (a throwaway import), which is
+the target of the cross-project tool check. Teardown removes all of it. The fixture refuses to run unless
+REDCap's `is_development_server` flag is on, because it ships with the module.
+
+The cross-project check was mutation-tested: with `TokenPolicyPreHook` taken out of the built-in hooks, X1
+fails (the tool result reached the standard model); with it in, X1 passes.
 
 ```bash
 W=/var/www/html/modules-local/secure_chat_ai_v9.9.9

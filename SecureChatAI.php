@@ -24,6 +24,7 @@ require_once "classes/ProjectAccessPreHook.php";
 require_once "classes/JsonConfigToolAdapter.php";
 require_once "classes/ToolPipeline.php";
 require_once "classes/TokenPolicy.php";
+require_once "classes/TokenPolicyPreHook.php";
 
 require_once __DIR__ . '/vendor/autoload.php';
 
@@ -505,15 +506,25 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
     {
         $minimum = $this->activeTokenPolicy ?? TokenPolicy::STANDARD;
         if ($project_id) {
-            try {
-                $projectDefault = TokenPolicy::normalize($this->getProjectSetting('token-policy-default', $project_id));
-            } catch (TokenPolicyException $e) {
-                // A stored value we don't recognize: fail closed.
-                $projectDefault = TokenPolicy::HIGH;
-            }
-            $minimum = TokenPolicy::stricter($minimum, $projectDefault ?? TokenPolicy::STANDARD);
+            $minimum = TokenPolicy::stricter($minimum, $this->getProjectMinimumTokenPolicy($project_id));
         }
         return $minimum;
+    }
+
+    /**
+     * A project's Minimum Token Policy (`token-policy-default`), 'standard' when
+     * unset. Used for the calling project and, by TokenPolicyPreHook, for any
+     * project a tool reads.
+     */
+    public function getProjectMinimumTokenPolicy(int $project_id): string
+    {
+        try {
+            return TokenPolicy::normalize($this->getProjectSetting('token-policy-default', $project_id))
+                ?? TokenPolicy::STANDARD;
+        } catch (TokenPolicyException $e) {
+            // A stored value we don't recognize: fail closed.
+            return TokenPolicy::HIGH;
+        }
     }
 
     /**
@@ -731,10 +742,30 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
 
     /**
      * Return the model aliases configured under a token policy.
+     *
+     * With no policy, it is the one a callAI() from $projectId (default: the
+     * current project context) gets when it passes none — so a caller validating
+     * its configured alias (MICA's assertModelIsRegistered) checks the right set
+     * on a project whose Minimum Token Policy is `high`.
      */
-    public function getAvailableModels(string $tokenPolicy = TokenPolicy::STANDARD): array
+    public function getAvailableModels(?string $tokenPolicy = null, ?int $projectId = null): array
     {
         $this->initSecureChatAI();
+        try {
+            $tokenPolicy = TokenPolicy::normalize($tokenPolicy);
+        } catch (TokenPolicyException $e) {
+            return [];
+        }
+        if ($tokenPolicy === null) {
+            if ($projectId === null) {
+                try {
+                    $projectId = $this->getProjectId() ? (int) $this->getProjectId() : null;
+                } catch (\Throwable $e) {
+                    $projectId = null;
+                }
+            }
+            $tokenPolicy = $this->minimumTokenPolicy($projectId);
+        }
         return array_keys($this->modelConfig[$tokenPolicy] ?? []);
     }
 
@@ -1428,6 +1459,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
         $context->set('secure_chat_ai_instance', $this);
         $context->set('guzzle_client', $this->guzzleClient);
         $context->set('model', $model);
+        // For TokenPolicyPreHook, and for tool EMs that make their own LLM call in a
+        // separate request (activeTokenPolicy doesn't reach a new PHP request).
+        $context->set('token_policy', $this->activeTokenPolicy ?? TokenPolicy::STANDARD);
 
         // Phase 1: Lookup tool config from JSON registry
         $toolConfig = null;
@@ -1531,8 +1565,9 @@ class SecureChatAI extends \ExternalModules\AbstractExternalModule
      */
     private function loadPreToolUseHooks(?int $projectId = null): array
     {
-        // ProjectAccessPreHook is always-on — core governance, not configurable
-        $builtin = [new ProjectAccessPreHook()];
+        // ProjectAccessPreHook and TokenPolicyPreHook are always-on — core
+        // governance, not configurable
+        $builtin = [new ProjectAccessPreHook(), new TokenPolicyPreHook($this)];
         $system  = $this->loadHooksFromSetting('pre_tool_use_hooks', PreToolUseHook::class, null);
         $project = $projectId
             ? $this->loadHooksFromSetting('project_pre_tool_use_hooks', PreToolUseHook::class, $projectId)
