@@ -28,3 +28,6 @@
 CAPPY.md
 logs/
 tests/e2e/shots/
+
+# Exported prod model settings: contain live AI Hub keys
+model_settings_prod.txt
