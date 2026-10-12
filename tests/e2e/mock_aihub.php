@@ -13,7 +13,8 @@
  *
  * Chat replies (OpenAI shape) echo the alias, path and key so the smoke-test page shows them.
  * Agent-mode calls (response_format json_schema) get an agent JSON reply: a spawnAgent tool call when
- * the conversation contains E2E_SPAWN and no child has answered yet, otherwise a final answer.
+ * the conversation contains E2E_SPAWN and no child has answered yet; a projects.getMetadata call on
+ * PID 282 as the first step of an E2E_CROSS conversation; otherwise a final answer.
  */
 
 if (PHP_SAPI !== 'cli-server') {
@@ -47,6 +48,9 @@ file_put_contents(LOG, json_encode([
     'body_keys' => is_array($body) ? array_keys($body) : [],
     'model'     => $body['model'] ?? null,
     'raw_has_token_policy' => str_contains($raw, 'token_policy'),
+    // The TokenPolicyPreHook denial text, as fed back to the model after a refused tool call.
+    'has_policy_denial'    => str_contains($allText, 'requires the \'high\' AI token policy'),
+    'messages'             => count($messages),
 ]) . "\n", FILE_APPEND);
 
 $parts = explode('/', trim($path, '/'));
@@ -55,7 +59,9 @@ $alias = $parts[1] ?? '?';
 $tag = "path=/{$policy}/{$alias} key={$key}";
 
 if (isset($body['response_format']['json_schema'])) {
-    if (str_contains($allText, 'E2E_SPAWN') && !str_contains($allText, 'E2E_CHILD_DONE')) {
+    if (str_contains($allText, 'E2E_CROSS') && count($messages) <= 2) {
+        $content = json_encode(['tool_call' => ['name' => 'projects.getMetadata', 'arguments' => ['pid' => 282]]]);
+    } elseif (str_contains($allText, 'E2E_SPAWN') && !str_contains($allText, 'E2E_CHILD_DONE')) {
         $content = json_encode(['tool_call' => ['name' => 'spawnAgent', 'arguments' => ['prompt' => 'E2E_CHILD task']]]);
     } elseif (str_contains($allText, 'E2E_CHILD task') && !str_contains($allText, 'E2E_SPAWN')) {
         $content = json_encode(['final_answer' => "E2E_CHILD_DONE {$tag}"]);

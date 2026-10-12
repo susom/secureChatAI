@@ -425,7 +425,8 @@ Long conversations can be compacted server-side via `runCompaction()`:
 |--------|-------------|
 | `callAI($model, $params, $pid)` | Primary entry point for all model calls |
 | `getToolCatalogForProject($pid)` | Returns all discovered tool definitions for a project |
-| `getAvailableModels($tokenPolicy = 'standard')` | Returns the model aliases configured under one token policy |
+| `getAvailableModels($tokenPolicy = null, $projectId = null)` | Model aliases under one token policy; with none, the set a call from that project (default: current) would get |
+| `getProjectMinimumTokenPolicy($pid)` | A project's Minimum Token Policy (`standard` / `high`) |
 | `getModelContextWindow($model)` | Returns context window size in tokens |
 | `runCompaction($messages, $model, ..., $tokenPolicy, $projectId)` | Server-side conversation compaction |
 

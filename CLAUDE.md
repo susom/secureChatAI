@@ -38,6 +38,7 @@
 ### AI Hub token policy (2026-10, branch feature/token-policy)
 - Two system tokens (`aihub-token-standard`, `aihub-token-high-threshold`), a per-row `token-policy`, and a super-user project minimum (`token-policy-default`). Callers pass `token_policy` in `callAI()` params or the REST payload. It's a data rule: no fallback, and the project minimum is a floor. Logic lives in `classes/TokenPolicy.php`; design, contract and prod rollout are in `docs/token-policy.md`.
 - Any new internal `callLLMOnce()` path must carry `token_policy` (or run inside `callAI()` so `activeTokenPolicy` covers it).
+- `TokenPolicyPreHook` (built-in) denies a tool call whose `pid` has a stricter minimum than the conversation; tools must keep passing the target project as `pid`.
 
 ### Known issues
 - grok-3: "Model service is unavailable" on AI Hub side (not code issue)

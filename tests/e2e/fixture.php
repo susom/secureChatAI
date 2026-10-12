@@ -13,9 +13,11 @@
  *   2. Writes the test model rows and fake tokens (see ROWS).
  *   3. Creates a throwaway super user (USER) with a module-API token on PID, and enables the module
  *      on PID, so the REST actions can be called with a real REDCap API token.
- * teardown: restores the backup exactly, removes the user, the PID settings and the backup.
+ *   4. Gives that user rights on TARGET_PID (a throwaway import) so routing.php can drive a
+ *      cross-project tool call into it; routing.php sets and clears TARGET_PID's minimum itself.
+ * teardown: restores the backup exactly, removes the user, the PID / TARGET_PID settings and the backup.
  *
- * Local only. Never run against production.
+ * Local only: refuses to run unless REDCap's is_development_server flag is set.
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -28,8 +30,16 @@ $mode = (string)($argv[1] ?? '');
 define('NOAUTH', true);
 require_once '/var/www/html/redcap_connect.php';
 
+// This file ships with the module. It creates an admin with a known password and swaps system
+// settings, so it must be inert anywhere but a development server.
+if (empty($GLOBALS['is_development_server'])) {
+    fwrite(STDERR, "Refusing to run: not a development server (is_development_server is off).\n");
+    exit(1);
+}
+
 const PREFIX = 'secure_chat_ai';
 const PID = 270; // "Tweak UI" — local dev test project
+const TARGET_PID = 282; // "ELIG REPRO ..." — throwaway import; cross-project tool target
 const USER = 'e2e_sca_admin';
 const PASS = 'E2eScaAdmin!2026';
 const BACKUP = '/tmp/sca_e2e_settings_backup.json';
@@ -74,9 +84,9 @@ if ($mode === 'teardown') {
     } else {
         out('no backup found', 'system settings untouched');
     }
-    q("delete from redcap_external_module_settings where external_module_id = ? and project_id = ?", [$moduleId, PID]);
-    out('PID ' . PID . ' module settings removed');
-    q("delete from redcap_user_rights where project_id = ? and username = ?", [PID, USER]);
+    q("delete from redcap_external_module_settings where external_module_id = ? and project_id in (?, ?)", [$moduleId, PID, TARGET_PID]);
+    out('PID ' . PID . ' and ' . TARGET_PID . ' module settings removed');
+    q("delete from redcap_user_rights where project_id in (?, ?) and username = ?", [PID, TARGET_PID, USER]);
     q("delete from redcap_auth where username = ?", [USER]);
     q("delete from redcap_user_information where username = ?", [USER]);
     @unlink(TOKEN_FILE);
@@ -90,8 +100,8 @@ if ($mode !== 'setup') fail("usage: php fixture.php setup|teardown");
 echo "\n=== SecureChatAI token-policy fixture ===\n";
 
 if (is_file(BACKUP)) fail('a backup already exists at ' . BACKUP . ' — run teardown first');
-if ((int)db_result(q("select count(*) from redcap_external_module_settings where external_module_id = ? and project_id = ?", [$moduleId, PID]), 0) > 0) {
-    fail('PID ' . PID . ' already has SecureChatAI settings; this fixture would delete them on teardown');
+if ((int)db_result(q("select count(*) from redcap_external_module_settings where external_module_id = ? and project_id in (?, ?)", [$moduleId, PID, TARGET_PID]), 0) > 0) {
+    fail('PID ' . PID . ' or ' . TARGET_PID . ' already has SecureChatAI settings; this fixture would delete them on teardown');
 }
 
 $backup = [];
@@ -124,7 +134,7 @@ $module->removeSystemSetting('agent_tool_em_prefixes');
 out('test model rows written', count(ROWS) . ' rows -> ' . MOCK);
 
 // Throwaway super user with a module-API token on PID.
-q("delete from redcap_user_rights where project_id = ? and username = ?", [PID, USER]);
+q("delete from redcap_user_rights where project_id in (?, ?) and username = ?", [PID, TARGET_PID, USER]);
 q("delete from redcap_auth where username = ?", [USER]);
 q("delete from redcap_user_information where username = ?", [USER]);
 $salt = \Authentication::generatePasswordSalt();
@@ -139,6 +149,7 @@ q("insert into redcap_user_information (username, user_email, user_firstname, us
 $apiToken = strtoupper(bin2hex(random_bytes(16)));
 q("insert into redcap_user_rights (project_id, username, design, user_rights, api_token, api_modules) values (?, ?, 1, 0, ?, 1)",
     [PID, USER, $apiToken]);
+q("insert into redcap_user_rights (project_id, username, design, user_rights) values (?, ?, 0, 0)", [TARGET_PID, USER]);
 file_put_contents(TOKEN_FILE, $apiToken);
 chmod(TOKEN_FILE, 0600);
 out('super user', USER . ' / ' . PASS);

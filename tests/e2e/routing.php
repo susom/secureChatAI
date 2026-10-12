@@ -176,6 +176,41 @@ $r = $m->callAI('gpt-4-1-nano', chat('E2E_SPAWN please') + ['agent_mode' => true
 $s = seen();
 check('R15 agent fallback picks a schema model from the high set only', $s !== [] && allOn($s, HIGH, 'e2e-high-key'), paths($s));
 
+echo "cross-project tool calls (TokenPolicyPreHook)\n";
+// Like Cappy: the conversation runs under its own project (PID, no minimum) and a record tool
+// reaches into another project (TARGET_PID) whose minimum is high.
+const TARGET_PID = 282;
+$m->setSystemSetting('agent_tool_em_prefixes', 'redcap_agent_record_tools');
+$m->setProjectSetting('token-policy-default', 'high', TARGET_PID);
+setMinimum(null);
+
+resetMock();
+$r = $m->callAI('gpt-5-4', chat('E2E_CROSS show me project 282') + ['agent_mode' => true], PID, 'e2e_sca_admin');
+$s = seen();
+check('X1 standard conversation stays on standard (no mid-loop upgrade)', count($s) >= 2 && allOn($s, STD . 'gpt-5-4', 'e2e-std-key'), paths($s));
+check('X1 tool on a high-minimum project is denied before it runs', count($s) >= 2 && $s[1]['has_policy_denial'] === true, json_encode($s[1] ?? null));
+
+resetMock();
+$r = $m->callAI('gpt-5-4', chat('E2E_CROSS show me project 282') + ['agent_mode' => true, 'token_policy' => 'high'], PID, 'e2e_sca_admin');
+$s = seen();
+check('X2 high conversation may read the high-minimum project', count($s) >= 2 && allOn($s, HIGH . 'gpt-5-4', 'e2e-high-key') && $s[1]['has_policy_denial'] === false, paths($s) . ' ' . json_encode($s[1] ?? null));
+
+$m->removeProjectSetting('token-policy-default', TARGET_PID);
+resetMock();
+$r = $m->callAI('gpt-5-4', chat('E2E_CROSS show me project 282') + ['agent_mode' => true], PID, 'e2e_sca_admin');
+$s = seen();
+check('X3 no minimum on the target -> the guard stays out of the way', count($s) >= 2 && $s[1]['has_policy_denial'] === false, json_encode($s[1] ?? null));
+$m->removeSystemSetting('agent_tool_em_prefixes');
+
+echo "getAvailableModels()\n";
+$sortV = function (array $a) { sort($a); return $a; };
+check('G1 no project -> standard aliases', $sortV($m->getAvailableModels()) === ['gpt-4-1', 'gpt-5-4'], json_encode($m->getAvailableModels()));
+check("G2 'high' -> high aliases", $sortV($m->getAvailableModels('high')) === ['gpt-4-1-nano', 'gpt-5-4'], json_encode($m->getAvailableModels('high')));
+setMinimum('high');
+check('G3 no policy on a high-minimum project -> high aliases (what MICA validates against)', $sortV($m->getAvailableModels(null, PID)) === ['gpt-4-1-nano', 'gpt-5-4'], json_encode($m->getAvailableModels(null, PID)));
+setMinimum(null);
+check('G4 unknown policy -> empty list', $m->getAvailableModels('ultra') === []);
+
 echo "compaction\n";
 $long = [];
 for ($i = 0; $i < 12; $i++) {
