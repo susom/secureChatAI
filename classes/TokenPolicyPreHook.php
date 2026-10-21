@@ -26,16 +26,31 @@ class TokenPolicyPreHook implements PreToolUseHook
 
     public function handle(ToolUse $use, ToolContext $context): HookResult
     {
-        // Tools name the target project 'pid'; accept 'project_id' too so a tool
-        // that names it differently can't skip this check.
-        $raw = $use->input['pid'] ?? $use->input['project_id'] ?? null;
-        $pid = $raw !== null ? (int) $raw : null;
-        if (empty($pid)) {
+        // Tools name the target project 'pid'; check 'project_id' too so a tool
+        // that names it differently can't skip this check. Every key present is
+        // checked, and a present value that isn't a project id is denied, so
+        // {"pid": 0, "project_id": 282} can't slip past on the empty one.
+        $pids = [];
+        foreach (['pid', 'project_id'] as $key) {
+            if (!array_key_exists($key, $use->input) || $use->input[$key] === null || $use->input[$key] === '') {
+                continue;
+            }
+            $value = $use->input[$key];
+            if (!is_numeric($value) || (int) $value <= 0 || (string)(int) $value !== trim((string) $value)) {
+                return HookResult::deny("Invalid project id in '{$key}'.");
+            }
+            $pids[] = (int) $value;
+        }
+        if (!$pids) {
             return HookResult::allow();
         }
 
         $conversation = (string) $context->get('token_policy', TokenPolicy::STANDARD);
-        $required = $this->module->getProjectMinimumTokenPolicy($pid);
+        $required = TokenPolicy::STANDARD;
+        foreach (array_unique($pids) as $p) {
+            $required = TokenPolicy::stricter($required, $this->module->getProjectMinimumTokenPolicy($p));
+        }
+        $pid = implode(', ', array_unique($pids));
 
         if (TokenPolicy::stricter($conversation, $required) === $conversation) {
             return HookResult::allow();
