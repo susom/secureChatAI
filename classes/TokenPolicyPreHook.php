@@ -26,7 +26,10 @@ class TokenPolicyPreHook implements PreToolUseHook
 
     public function handle(ToolUse $use, ToolContext $context): HookResult
     {
-        $pid = isset($use->input['pid']) ? (int) $use->input['pid'] : null;
+        // Tools name the target project 'pid'; accept 'project_id' too so a tool
+        // that names it differently can't skip this check.
+        $raw = $use->input['pid'] ?? $use->input['project_id'] ?? null;
+        $pid = $raw !== null ? (int) $raw : null;
         if (empty($pid)) {
             return HookResult::allow();
         }

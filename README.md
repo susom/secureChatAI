@@ -621,10 +621,10 @@ SecureChatAI exposes a **REDCap External Module API endpoint** for backend servi
 |--------|-------------|
 | `callAI` | Simple prompt → response. Wraps a prompt into messages and calls the LLM (no agent mode). Optional `token_policy` (`standard` / `high`); the response includes the `token_policy` that served it. |
 | `messages` | Claude Messages API-compatible endpoint. Accepts `{model, messages, max_tokens, temperature, system, top_p, stop, token_policy}`. Returns Claude-format response. |
-
-Both actions refuse with HTTP 400 when `token_policy` is below the API token's project minimum, unknown, or the
-model isn't configured under it (see [docs/token-policy.md](docs/token-policy.md#rest-api-contentexternalmoduleprefixsecure_chat_ai)).
 | `getSession` | Rehydrate a conversation session. Accepts `{session_id, project_id}`. Returns full session with messages and metadata. |
+
+`callAI` and `messages` refuse with HTTP 400 when `token_policy` is below the API token's project minimum, unknown, or the
+model isn't configured under it (see [docs/token-policy.md](docs/token-policy.md#rest-api-contentexternalmoduleprefixsecure_chat_ai)).
 
 ### Example: `callAI` via cURL
 

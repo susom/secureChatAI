@@ -170,6 +170,7 @@ final class TokenPolicy
         $aliases  = self::rowValues($settings['model-alias'] ?? null);
         $policies = self::rowValues($settings['token-policy'] ?? null);
         $tokens   = self::rowValues($settings['api-token'] ?? null);
+        $defaults = self::rowValues($settings['default-model'] ?? null);
         $systemTokens = [
             self::STANDARD => trim((string)($settings['aihub-token-standard'] ?? '')),
             self::HIGH     => trim((string)($settings['aihub-token-high-threshold'] ?? '')),
@@ -195,6 +196,12 @@ final class TokenPolicy
             if ($rowToken === '' && $systemTokens[$policy] === '') {
                 $errors[] = "Model '{$alias}' uses the {$policy} policy but has no API token: "
                     . "set '{$labels[$policy]}' or the row's API Token override.";
+            }
+            // The default model serves calls of every policy, so it must be a standard row:
+            // a high default would make every standard call that relies on it a refusal.
+            if ($policy === self::HIGH && !empty($defaults[$i])) {
+                $errors[] = "Model '{$alias}' is high-threshold and can't be the default model: "
+                    . "mark a standard model as the default instead.";
             }
         }
 

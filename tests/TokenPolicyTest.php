@@ -127,6 +127,12 @@ check('scalar (single-row) values handled', TokenPolicy::validateSettings($singl
 $badRow = $base;
 $badRow['token-policy'] = ['standard', 'ultra'];
 check('unknown row policy is refused', is_string(TokenPolicy::validateSettings($badRow)));
+$highDefault = $base;
+$highDefault['default-model'] = [false, true];
+check('high row marked default is refused', is_string(TokenPolicy::validateSettings($highDefault)));
+$stdDefault = $base;
+$stdDefault['default-model'] = [true, false];
+check('standard row marked default passes', TokenPolicy::validateSettings($stdDefault) === null);
 check('project save with valid minimum passes', TokenPolicy::validateSettings(['token-policy-default' => 'high']) === null);
 check('project save with empty minimum passes', TokenPolicy::validateSettings(['token-policy-default' => null]) === null);
 check('project save with bad minimum is refused', is_string(TokenPolicy::validateSettings(['token-policy-default' => 'x'])));

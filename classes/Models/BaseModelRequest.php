@@ -177,7 +177,8 @@ abstract class BaseModelRequest implements ModelInterface {
      * response body), so the capture deliberately does NOT go anywhere near emDebug or the REDCap log
      * tables. It goes to a directory an operator has to create by hand.
      *
-     * Arming takes two acts, and undoing either one disarms it:
+     * Never runs on a production server (`is_development_server` off). On a development server,
+     * arming takes two acts, and undoing either one disarms it:
      *   1. point SECURECHAT_CAPTURE_DIR (env) or the `securechat-capture-dir` system setting at a path
      *   2. create that directory and make it writable
      *
@@ -192,6 +193,10 @@ abstract class BaseModelRequest implements ModelInterface {
     protected function captureRequest(string $apiEndpoint, string|array $params, array $headers): void
     {
         try {
+            // Development servers only, same gate as logFullRequest(): the body is the prompt (PHI).
+            if (empty($GLOBALS['is_development_server'])) {
+                return;
+            }
             $dir = $this->captureDir();
             if ($dir === null) {
                 return;
